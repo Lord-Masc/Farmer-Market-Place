@@ -1,7 +1,39 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { supabase } from '../services/supabase';
 
 const Login = () => {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        setError(signInError.message);
+        setLoading(false);
+        return;
+      }
+
+      navigate('/dashboard');
+    } catch (err) {
+      console.error(err);
+      setError('An unexpected error occurred. Please try again.');
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen font-dmsans flex items-center justify-center bg-cream px-4 relative overflow-hidden">
       {/* Background blobs matching the hero section */}
@@ -19,12 +51,21 @@ const Login = () => {
           <p className="text-[#4a4a4a] text-sm">Sign in to your account</p>
         </div>
 
-        <form className="space-y-5" onSubmit={(e) => e.preventDefault()}>
+        {error && (
+          <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl font-medium text-center">
+            {error}
+          </div>
+        )}
+
+        <form className="space-y-5" onSubmit={handleLogin}>
           <div className="space-y-1.5 text-left">
-            <label className="text-sm font-medium text-green-deep block">Email or Phone Number</label>
+            <label className="text-sm font-medium text-green-deep block">Email Address</label>
             <input 
-              type="text" 
-              placeholder="Enter your credential" 
+              type="email" 
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@example.com" 
               className="w-full bg-cream-dark rounded-xl px-4 py-3 text-sm text-[#4a4a4a] border border-transparent focus:border-green-fresh focus:bg-white focus:outline-none transition-all duration-300 placeholder-gray-400"
             />
           </div>
@@ -36,6 +77,9 @@ const Login = () => {
             </div>
             <input 
               type="password" 
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••" 
               className="w-full bg-cream-dark rounded-xl px-4 py-3 text-sm text-[#4a4a4a] border border-transparent focus:border-green-fresh focus:bg-white focus:outline-none transition-all duration-300 placeholder-gray-400"
             />
@@ -43,9 +87,10 @@ const Login = () => {
 
           <button 
             type="submit" 
-            className="w-full bg-green-deep text-white rounded-xl py-3.5 text-sm font-bold shadow-md hover:bg-green-mid hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(45,106,79,0.35)] transition-all duration-300 mt-2"
+            disabled={loading}
+            className={`w-full bg-green-deep text-white rounded-xl py-3.5 text-sm font-bold shadow-md hover:bg-green-mid transition-all duration-300 mt-2 ${loading ? 'opacity-70 cursor-not-allowed' : 'hover:-translate-y-[1px] hover:shadow-[0_6px_20px_rgba(45,106,79,0.35)]'}`}
           >
-            Sign In
+            {loading ? 'Signing In...' : 'Sign In'}
           </button>
         </form>
 
