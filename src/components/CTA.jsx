@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 const CTA = () => {
   return (
@@ -16,12 +17,12 @@ const CTA = () => {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-[1rem] justify-center w-full">
-          <button className="bg-amber text-green-deep px-[2.2rem] py-[0.9rem] rounded-full font-dmsans font-bold hover:bg-amber-light hover:-translate-y-[2px] hover:shadow-[0_10px_30px_rgba(233,168,76,0.4)] transition-all duration-300">
+          <Link to="/signup" className="bg-amber text-green-deep px-[2.2rem] py-[0.9rem] rounded-full font-dmsans font-bold hover:bg-amber-light hover:-translate-y-[2px] hover:shadow-[0_10px_30px_rgba(233,168,76,0.4)] transition-all duration-300">
             🌾 List Your Farm for Free
-          </button>
-          <button className="border-[1.5px] border-white/30 text-white bg-transparent px-[2.2rem] py-[0.9rem] rounded-full font-dmsans font-bold hover:border-white hover:bg-white/10 transition-all duration-300">
+          </Link>
+          <Link to="/products" className="border-[1.5px] border-white/30 text-white bg-transparent px-[2.2rem] py-[0.9rem] rounded-full font-dmsans font-bold hover:border-white hover:bg-white/10 transition-all duration-300">
             🛒 Shop Fresh Produce
-          </button>
+          </Link>
         </div>
       </div>
     </section>

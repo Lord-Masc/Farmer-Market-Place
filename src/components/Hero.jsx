@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 const Hero = () => {
   return (
@@ -30,12 +31,12 @@ const Hero = () => {
           </p>
 
           <div className="flex flex-wrap gap-4 animate-fadeUp" style={{ animationDelay: '0.65s', opacity: 0 }}>
-            <button className="bg-green-deep text-white px-[2rem] py-[0.85rem] rounded-full font-dmsans text-[1rem] font-semibold hover:bg-green-mid hover:-translate-y-[2px] transition-all duration-300 hover:shadow-[0_10px_30px_rgba(26,58,42,0.3)] shadow-md cursor-pointer">
+            <Link to="/products" className="bg-green-deep text-white px-[2rem] py-[0.85rem] rounded-full font-dmsans text-[1rem] font-semibold hover:bg-green-mid hover:-translate-y-[2px] transition-all duration-300 hover:shadow-[0_10px_30px_rgba(26,58,42,0.3)] shadow-md cursor-pointer">
               🛒 Start Shopping
-            </button>
-            <button className="border-[1.5px] border-green-deep text-green-deep bg-transparent px-[2rem] py-[0.85rem] rounded-full font-dmsans text-[1rem] font-semibold hover:bg-green-deep hover:text-white transition-all duration-300 cursor-pointer">
+            </Link>
+            <Link to="/signup" className="border-[1.5px] border-green-deep text-green-deep bg-transparent px-[2rem] py-[0.85rem] rounded-full font-dmsans text-[1rem] font-semibold hover:bg-green-deep hover:text-white transition-all duration-300 cursor-pointer">
               Sell Your Produce →
-            </button>
+            </Link>
           </div>
 
           <div className="flex flex-row flex-wrap sm:gap-[2.5rem] gap-[1.5rem] mt-4 animate-fadeUp" style={{ animationDelay: '0.8s', opacity: 0 }}>

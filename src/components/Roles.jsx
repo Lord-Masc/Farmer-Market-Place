@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 const Roles = () => {
   return (
@@ -34,9 +35,9 @@ const Roles = () => {
               ))}
             </div>
             
-            <button className="bg-amber text-green-deep rounded-full px-[1.8rem] py-[0.75rem] font-dmsans text-[0.9rem] font-semibold hover:bg-amber-light hover:-translate-y-[2px] transition-all duration-300 shadow-md">
+            <Link to="/signup" className="inline-block bg-amber text-green-deep rounded-full px-[1.8rem] py-[0.75rem] font-dmsans text-[0.9rem] font-semibold hover:bg-amber-light hover:-translate-y-[2px] transition-all duration-300 shadow-md">
               Register as Farmer →
-            </button>
+            </Link>
           </div>
 
           {/* Buyer Card */}
@@ -63,9 +64,9 @@ const Roles = () => {
               ))}
             </div>
             
-            <button className="bg-green-deep text-white rounded-full px-[1.8rem] py-[0.75rem] font-dmsans text-[0.9rem] font-semibold hover:-translate-y-[2px] transition-all duration-300 shadow-md">
+            <Link to="/signup" className="inline-block bg-green-deep text-white rounded-full px-[1.8rem] py-[0.75rem] font-dmsans text-[0.9rem] font-semibold hover:-translate-y-[2px] transition-all duration-300 shadow-md">
               Start Shopping →
-            </button>
+            </Link>
           </div>
         </div>
       </div>
