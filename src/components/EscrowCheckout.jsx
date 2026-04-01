@@ -90,12 +90,11 @@ const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, product
         if (!sdkLoaded) {
             setError('Could not load payment gateway. Please check your internet connection.');
             setLoading(false);
-            return;
         }
 
         try {
             // Step 1: Create backend order
-            const res = await fetch('http://localhost:5000/api/escrow/create-order', {
+            const res = await fetch('http://localhost:5001/api/escrow/create-order', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -128,7 +127,7 @@ const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, product
                 modal: { escape: false },
                 handler: async (response) => {
                     // Step 3: Verify & hold payment
-                    const verify = await fetch('http://localhost:5000/api/escrow/verify-payment', {
+                    const verify = await fetch('http://localhost:5001/api/escrow/verify-payment', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({

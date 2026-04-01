@@ -200,28 +200,39 @@ const FarmerDashboard = () => {
         }
       }
     };
-    initFarmer();
 
-    // Enable Realtime for Orders (Farmer Side)
-    const ordersSubscription = supabase
-      .channel('farmer-orders')
-      .on('postgres_changes', { 
-          event: '*', 
-          schema: 'public', 
-          table: 'orders',
-          filter: `farmer_id=eq.${user?.id}`
-      }, (payload) => {
-          console.log("Realtime Update for Farmer:", payload);
-          if (payload.new && payload.new.status === 'PAID') {
-              setEscrowNotification({ show: true, orderId: payload.new.id, amount: payload.new.total_price });
-              setTimeout(() => setEscrowNotification({ show: false, orderId: null, amount: 0 }), 8000);
-          }
-          fetchMyOrders();
-      })
-      .subscribe();
+    let ordersSubscription;
+
+    if (user) {
+        initFarmer();
+        // Enable Realtime for Orders (Farmer Side)
+        ordersSubscription = supabase
+          .channel('farmer-orders')
+          .on('postgres_changes', { 
+              event: '*', 
+              schema: 'public', 
+              table: 'orders',
+              filter: `farmer_id=eq.${user.id}`
+          }, (payload) => {
+              if (payload.new && (payload.new.status === 'PAID' || payload.new.status === 'pending')) {
+                  setEscrowNotification({ 
+                      show: true, 
+                      orderId: payload.new.id, 
+                      amount: payload.new.total_price,
+                      type: payload.new.status === 'PAID' ? 'payment' : 'request'
+                  });
+                  setTimeout(() => setEscrowNotification({ show: false, orderId: null, amount: 0 }), 8000);
+              }
+              // Wait a fraction to ensure consistency
+              setTimeout(() => {
+                  fetchMyOrders();
+              }, 500);
+          })
+          .subscribe();
+    }
 
     return () => {
-        ordersSubscription.unsubscribe();
+        if (ordersSubscription) ordersSubscription.unsubscribe();
     };
   }, [user]);
 
@@ -232,22 +243,36 @@ const FarmerDashboard = () => {
 
   const fetchMyOrders = async () => {
     try {
-        const { data, error } = await supabase.from('orders').select(`
-            *,
-            product:products(*),
-            buyer:profiles!buyer_id(first_name, last_name, phone_number, phone)
-        `).eq('farmer_id', user.id).order('created_at', { ascending: false });
+        const { data: rawOrders, error } = await supabase.from('orders').select('*').eq('farmer_id', user.id).order('created_at', { ascending: false });
         
         if (error) {
             console.error("Farmer fetch error:", error);
-            const { data: simpleData } = await supabase.from('orders').select('*, product:products(*)').eq('farmer_id', user.id).order('created_at', { ascending: false });
-            if (simpleData) setOrders(simpleData);
-        } else {
-            console.log("Farmer orders with buyer info:", data);
-            setOrders(data || []);
+            return;
         }
+
+        // Fetch products manually
+        const productIds = [...new Set(rawOrders.map(o => o.product_id).filter(Boolean))];
+        const { data: products } = await supabase.from('products').select('*').in('id', productIds);
+        const productsMap = {};
+        if (products) products.forEach(p => productsMap[p.id] = p);
+
+        // Fetch buyers manually
+        const buyerIds = [...new Set(rawOrders.map(o => o.buyer_id).filter(Boolean))];
+        const { data: buyers } = await supabase.from('profiles').select('id, first_name, last_name, phone_number, phone').in('id', buyerIds);
+        const buyersMap = {};
+        if (buyers) buyers.forEach(b => buyersMap[b.id] = b);
+
+        const mergedOrders = rawOrders.map(o => ({
+            ...o,
+            product: productsMap[o.product_id] || {},
+            buyer: buyersMap[o.buyer_id] || {}
+        }));
+
+        setOrders(mergedOrders || []);
     } catch (err) {
         console.error("Farmer Orders catch:", err);
+        const { data: fallback } = await supabase.from('orders').select('*').eq('farmer_id', user.id);
+        if (fallback) setOrders(fallback);
     }
   };
 
@@ -438,19 +463,41 @@ const FarmerDashboard = () => {
     
     setProcessingOrders(prev => ({ ...prev, [orderId]: true }));
     try {
-        // CALL NEW BACKEND API
-        const response = await fetch('http://localhost:5000/api/escrow/update-status', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                orderId,
-                farmerId: user.id,
-                newStatus
-            })
-        });
+        // Step 1: Fetch the order + product details (uses farmer's auth session — RLS OK)
+        const { data: orderData, error: orderError } = await supabase
+            .from('orders')
+            .select('*, product:products(*)')
+            .eq('id', orderId)
+            .single();
 
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Failed to update status");
+        if (orderError) throw new Error("Order not found: " + orderError.message);
+        if (orderData.farmer_id !== user.id) throw new Error("Unauthorized: This order doesn't belong to you.");
+
+        // Step 2: If approving ('confirmed'), reduce product stock
+        if (newStatus === 'confirmed' && (orderData.status === 'pending' || orderData.status === 'CREATED')) {
+            const orderQty = orderData.unit_at_order === 'quintal' ? (orderData.quantity * 100) : (orderData.quantity || 0);
+            const currentStock = orderData.product?.quantity || 0;
+
+            if (currentStock < orderQty) {
+                throw new Error(`🚨 Not Enough Stock: You only have ${currentStock} KG available.`);
+            }
+
+            // Reduce Stock
+            const { error: stockError } = await supabase
+                .from('products')
+                .update({ quantity: currentStock - orderQty })
+                .eq('id', orderData.product_id);
+
+            if (stockError) throw new Error("Stock update failed: " + stockError.message);
+        }
+
+        // Step 3: Update order status (uses farmer's auth session — RLS OK)
+        const { error: updateError } = await supabase
+            .from('orders')
+            .update({ status: newStatus })
+            .eq('id', orderId);
+
+        if (updateError) throw new Error("Status update failed: " + updateError.message);
 
         // UI Update
         setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
@@ -459,11 +506,9 @@ const FarmerDashboard = () => {
         fetchMyOrders();
         fetchMyProducts(); 
 
-        // Status updated silently — no popup
-
     } catch (err) {
         console.error("Status update failed:", err);
-        // Error logged silently — no popup
+        alert("⚠️ " + err.message);
     } finally {
         setProcessingOrders(prev => ({ ...prev, [orderId]: false }));
     }
@@ -623,14 +668,14 @@ const FarmerDashboard = () => {
                                             <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${
                                                 (order.status === 'pending' || order.status === 'CREATED' || order.status === 'PAID') ? 'bg-amber/20 text-amber' : 
                                                 order.status === 'confirmed' ? 'bg-green-deep text-amber border border-amber/10 shadow-sm' : 
-                                                order.status === 'delivered' ? 'bg-green-fresh text-white shadow-md' : 
+                                                (order.status === 'delivered' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-md' : 
                                                 order.status === 'declined' ? 'bg-red-500/20 text-red-600' :
                                                 order.status === 'SHIPPED' ? 'bg-blue-100 text-blue-600' :
                                                 'bg-green-fresh/20 text-green-fresh'
                                             }`}>
                                                 {(order.status === 'pending' || order.status === 'CREATED') ? 'New Request' : 
                                                  order.status === 'PAID' ? 'Payment Held (Escrow)' :
-                                                 order.status === 'delivered' ? 'Delivered Successful' : 
+                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Completed & Released' : 
                                                  order.status === 'declined' ? 'Request Rejected' :
                                                  order.status}
                                             </span>
@@ -638,7 +683,7 @@ const FarmerDashboard = () => {
                                     </td>
                                     <td className="p-6">
                                         <div className="flex gap-2">
-                                            {(order.status === 'pending' || order.status === 'CREATED' || order.status === 'PAID') && (
+                                            {(order.status === 'pending' || order.status === 'CREATED') && (
                                                 <>
                                                     <button 
                                                         onClick={() => handleUpdateOrderStatus(order.id, 'confirmed')} 
@@ -656,12 +701,17 @@ const FarmerDashboard = () => {
                                             )}
                                             {order.status === 'confirmed' && (
                                                 <span className="text-[10px] font-black text-amber uppercase italic flex items-center gap-1 opacity-70">
-                                                    <span>⏳</span> Waiting for Buyer Receipt...
+                                                    <span>⏳</span> Waiting for Payment...
                                                 </span>
                                             )}
-                                            {order.status === 'delivered' && (
-                                                <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1 animate-pulse">
-                                                    <span>💎</span> Fulfillment Verified
+                                            {order.status === 'PAID' && (
+                                                <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1 opacity-90 animate-pulse">
+                                                    <span>📦</span> Payment Held. Dispatch Now!
+                                                </span>
+                                            )}
+                                            {(order.status === 'delivered' || order.status === 'COMPLETED') && (
+                                                <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1">
+                                                    <span>💎</span> Paid & Completed
                                                 </span>
                                             )}
                                             {order.status === 'declined' && (

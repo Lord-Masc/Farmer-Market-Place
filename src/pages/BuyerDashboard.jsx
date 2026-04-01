@@ -248,19 +248,26 @@ const BuyerDashboard = () => {
 
   const fetchMarketplaceProducts = async (userLat, userLng) => {
     try {
-        // Step 1: Fetch all products with absolute farmer details
-        const { data, error } = await supabase.from('products').select(`
-            *,
-            farmer:profiles!farmer_id(first_name, last_name, latitude, longitude, phone_number)
-        `).order('created_at', { ascending: false });
+        // Step 1: Fetch all products
+        const { data: productsData, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
         
         if (error) {
-            console.warn("Market fetch error (falling back to simple fetch):", error);
-            const { data: rawData } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-            if (rawData) setProducts(rawData);
+            console.warn("Market fetch error:", error);
             return;
         }
 
+        // Step 2: Fetch corresponding farmer profiles
+        const farmerIds = [...new Set(productsData.map(p => p.farmer_id).filter(Boolean))];
+        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, latitude, longitude, phone_number, address, city').in('id', farmerIds);
+        
+        const profilesMap = {};
+        if (profiles) profiles.forEach(p => profilesMap[p.id] = p);
+
+        // Step 3: Attach profiles
+        const data = productsData.map(p => ({
+            ...p,
+            farmer: profilesMap[p.farmer_id] || {}
+        }));
         if (userLat && userLng) {
             const localProducts = data.filter(p => {
                 const pLat = Number(p.latitude);
@@ -316,23 +323,36 @@ const BuyerDashboard = () => {
 
   const fetchMyOrders = async () => {
     try {
-        // Precise join syntax for profiles through farmer_id
-        const { data, error } = await supabase.from('orders').select(`
-            *,
-            product:products(*),
-            farmer:profiles!farmer_id(first_name, last_name, phone_number)
-        `).eq('buyer_id', user.id).order('created_at', { ascending: false });
+        const { data: rawOrders, error } = await supabase.from('orders').select('*').eq('buyer_id', user.id).order('created_at', { ascending: false });
         
         if (error) {
             console.error("Order fetch error:", error);
-            // Fallback: try fetching without farmer profile if join is ambiguous
-            const { data: simpleData } = await supabase.from('orders').select('*, product:products(*)').eq('buyer_id', user.id).order('created_at', { ascending: false });
-            if (simpleData) setOrders(simpleData);
-        } else {
-            setOrders(data || []);
+            return;
         }
+
+        // Fetch products manually
+        const productIds = [...new Set(rawOrders.map(o => o.product_id).filter(Boolean))];
+        const { data: products } = await supabase.from('products').select('*').in('id', productIds);
+        const productsMap = {};
+        if (products) products.forEach(p => productsMap[p.id] = p);
+
+        // Fetch farmers manually
+        const farmerIds = [...new Set(rawOrders.map(o => o.farmer_id).filter(Boolean))];
+        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, phone_number').in('id', farmerIds);
+        const profilesMap = {};
+        if (profiles) profiles.forEach(p => profilesMap[p.id] = p);
+
+        const mergedOrders = rawOrders.map(o => ({
+            ...o,
+            product: productsMap[o.product_id] || {},
+            farmer: profilesMap[o.farmer_id] || {}
+        }));
+
+        setOrders(mergedOrders || []);
     } catch (err) {
-        console.error("Orders catch:", err);
+        console.error("Farmer Orders catch:", err);
+        const { data: fallback } = await supabase.from('orders').select('*').eq('buyer_id', user.id);
+        if (fallback) setOrders(fallback);
     }
   };
 
@@ -376,8 +396,8 @@ const BuyerDashboard = () => {
         const { error } = await supabase.from('orders').insert([{
             product_id: selectedProduct.id,
             buyer_id: user.id,
-            farmer_id: selectedProduct.farmer_id,
-            farmer_name: selectedProduct.farmer?.first_name || 'Farmer',
+            farmer_id: selectedProduct.farmer_id || selectedProduct.farmer?.id,
+            farmer_name: selectedProduct.farmer?.first_name || 'Merchant',
             farmer_phone: selectedProduct.farmer?.phone_number || '',
             quantity: orderQuantity,
             unit_at_order: orderUnit,
@@ -406,7 +426,7 @@ const BuyerDashboard = () => {
 
   const handleConfirmDelivery = async (id) => {
     try {
-        const res = await fetch('http://localhost:5000/api/escrow/confirm-delivery', {
+        const res = await fetch('http://localhost:5001/api/escrow/confirm-delivery', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ order_id: id })
@@ -773,7 +793,7 @@ const BuyerDashboard = () => {
                                                     Confirm Received ✅
                                                 </button>
                                             )}
-                                            {order.status === 'delivered' && (
+                                            {(order.status === 'delivered' || order.status === 'COMPLETED') && (
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center justify-end gap-1">
                                                     <span>✨</span> Order Completed
                                                 </span>

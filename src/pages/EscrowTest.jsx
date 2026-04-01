@@ -9,6 +9,7 @@ const EscrowTest = () => {
 
     // Fetch dynamic parameters from URL
     const dynamicData = {
+        orderId: searchParams.get('orderId') || '',
         productId: searchParams.get('productId') || '',
         buyerId: searchParams.get('buyerId') || '',
         sellerId: searchParams.get('sellerId') || '',
@@ -67,6 +68,7 @@ const EscrowTest = () => {
                     {/* Right Payment Section */}
                     <div className="w-full lg:sticky lg:top-32">
                         <EscrowCheckout 
+                            orderId={dynamicData.orderId}
                             productId={dynamicData.productId}
                             buyerId={dynamicData.buyerId}
                             sellerId={dynamicData.sellerId}
