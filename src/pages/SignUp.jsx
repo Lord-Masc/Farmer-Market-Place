@@ -20,6 +20,11 @@ const SignUp = () => {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // Clear errors when switching roles
+  React.useEffect(() => {
+    setError(null);
+  }, [role]);
+
   const handleSignUp = async (e) => {
     e.preventDefault();
     setError(null);
