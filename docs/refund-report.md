@@ -70,15 +70,39 @@ The script `scripts/refund-concurrency-test.js` was written and run (2026-11-08 
 
 ## Step 4 — AFTER result (concurrency re-run after the fix)
 
-_To be filled after re-running the same script against the fixed code._
+**Live re-run status: BLOCKED — same as BEFORE. No AFTER numbers exist.**
 
-## Before / After table
+The same script (`scripts/refund-concurrency-test.js`) was re-run against the FIXED code (2026-11-08 ~02:07 IST). It failed identically at the first Supabase call:
+
+- Result: `SUPABASE_UNREACHABLE: TypeError: fetch failed`, exit code 2.
+- Requests sent: 0. No test order was created, no refund request was fired, no rows were written.
+- Root cause: unchanged — the live Supabase project host is unreachable from this VM (egress proxy returns "Empty reply from server"). See Step 2 for the evidence.
+- **No AFTER numbers are reported — inventing them would be fabrication.** The before/after table below therefore has no live values; it records the block honestly.
+
+**What WAS verified instead (Jest unit tests, mocked Supabase + mocked Razorpay):**
+
+`backend/tests/refund.test.js` — 4/4 passed, `npm test` exit 0, 3.711s (2026-11-08):
+
+| Test | Result | Time |
+|---|---|---|
+| (1) double call — second refund is a no-op, exactly 1 gateway call | PASS | 75 ms |
+| (2) concurrent calls — 50 parallel, only 1 processes, 0 duplicates | PASS | 14 ms |
+| (3) cron overlap — two concurrent autoRefundJob runs, no duplicate | PASS | 19 ms |
+| (4) gateway failure — order ends REFUND_FAILED, not stuck (3 gateway attempts) | PASS | 3,023 ms |
+
+These are unit tests, not the live concurrency run. The mock models Postgres semantics faithfully (the atomic `UPDATE … WHERE status='REFUND_PENDING'` executes synchronously in one tick, like a row-locked UPDATE), so the concurrency logic is genuinely exercised — but the numbers are from the mocked harness, not from live Supabase. They are labelled as such and must not be quoted as live production numbers.
+
+**To get the live BEFORE/AFTER numbers**, run `node scripts/refund-concurrency-test.js` from a machine that can reach the live Supabase host (e.g. Rishabh's laptop), after applying `supabase/migrations/20261108_create_refunds.sql` in the Supabase SQL editor and setting a real Razorpay test-mode payment id in `TEST_RAZORPAY_PAYMENT_ID`.
+
+## Before / After table (live concurrency run)
 
 | Metric | Before | After |
 |---|---|---|
-| Requests sent | — | — |
-| Duplicate refunds | — | — |
-| Total over-refunded amount | — | — |
-| p95 latency | — | — |
+| Requests sent | not measured (live Supabase unreachable from VM) | not measured (live Supabase unreachable from VM) |
+| Duplicate refunds | not measured | not measured |
+| Total over-refunded amount | not measured | not measured |
+| p95 latency | not measured | not measured |
 
-_Numbers in this table are real measured values from the concurrency script runs only. Nothing is estimated._
+_No live numbers exist for this table. Both the BEFORE and AFTER live runs failed at the first Supabase call (`SUPABASE_UNREACHABLE`, exit 2, 0 requests sent) because this VM's egress proxy cannot reach the live Supabase project host. Nothing in this table is estimated or invented._
+
+**Measured numbers that DO exist (Jest unit tests, mocked — see Step 4):** 4/4 tests passed; 50 parallel refund calls → exactly 1 gateway call, 1 refund row, 0 duplicates; 2 overlapping cron runs → 1 refund row, 1 gateway call; gateway failure → order REFUND_FAILED after 3 attempts. These are unit-test measurements, not live production numbers.
