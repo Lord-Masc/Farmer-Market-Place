@@ -23,15 +23,17 @@ const razorpay = new Razorpay({
 // Helper: Handle supabase .single() safely
 const getSingle = (data) => (data && data.length > 0 ? data[0] : null);
 
-// Helper: Retry logic for API calls
+// Helper: Retry logic for API calls (exponential backoff — delay doubles each attempt)
 const retryAsync = async (fn, retries = 3, delay = 1000) => {
+    let currentDelay = delay;
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
         } catch (err) {
             if (i === retries - 1) throw err;
-            console.warn(`Attempt ${i + 1} failed, retrying in ${delay}ms...`);
-            await new Promise(r => setTimeout(r, delay));
+            console.warn(`Attempt ${i + 1} failed, retrying in ${currentDelay}ms...`);
+            await new Promise(r => setTimeout(r, currentDelay));
+            currentDelay *= 2;
         }
     }
 };
@@ -154,8 +156,9 @@ exports.markOrderAsPaid = async (order_id, razorpay_payment_id) => {
             .insert({
                 order_id,
                 amount: order.total_price,
-                status: 'HELD'
-                // Note: You can add razorpay_payment_id column to 'payments' if desired
+                status: 'HELD',
+                // Stored so a refund can call the Razorpay gateway (see refunds migration).
+                razorpay_payment_id: razorpay_payment_id || null
             });
         
         return updatedOrder;
@@ -253,51 +256,147 @@ exports.markOrderAsCompleted = async (order_id) => {
     }
 };
 
-// 5. Refund Order
-exports.refundOrder = async (order_id) => {
+// 5a. Move an order into the refund queue (REFUND_PENDING).
+// Idempotent: only PAID/SHIPPED move in. An order already REFUND_PENDING,
+// REFUNDED, COMPLETED or CREATED is untouched (returns null).
+exports.markRefundPending = async (order_id) => {
+    const { data, error } = await supabase
+        .from('orders')
+        .update({ status: 'REFUND_PENDING' })
+        .in('status', ['PAID', 'SHIPPED'])
+        .eq('id', order_id)
+        .select('*');
+    if (error) throw error;
+    return getSingle(data);
+};
+
+// Internal: process a refund for an order ALREADY claimed
+// (status = REFUND_PROCESSING, held by this caller). Does the idempotency
+// check, the gateway call, the ledger insert, and the status updates.
+// On gateway failure the order is moved to REFUND_FAILED (never stuck).
+async function processClaimedRefund(order) {
+    const order_id = order.id;
     try {
+        // Idempotency: if a refund row already exists for this order, never
+        // call the gateway again — return the stored result.
+        const { data: existing, error: refErr } = await supabase
+            .from('refunds')
+            .select('*')
+            .eq('order_id', order_id);
+        if (refErr) throw refErr;
+        const existingRefund = getSingle(existing);
+        if (existingRefund && existingRefund.gateway_refund_id) {
+            await supabase.from('orders').update({ status: 'REFUNDED' }).eq('id', order_id);
+            await supabase.from('payments').update({ status: 'REFUNDED' }).eq('order_id', order_id);
+            return { success: true, message: 'Refund already processed', alreadyHandled: true, gateway_refund_id: existingRefund.gateway_refund_id };
+        }
+
+        // Get the payment (Razorpay payment id + amount) for the gateway call.
         const { data: paymentData, error: fetchError } = await supabase
             .from('payments')
             .select('*')
             .eq('order_id', order_id);
-
         if (fetchError) throw fetchError;
         const payment = getSingle(paymentData);
+        if (!payment) throw new Error('Payment not found for order');
+        if (!payment.razorpay_payment_id) throw new Error('No Razorpay payment id stored for this order (cannot refund at gateway)');
 
-        // Update DB
-        await supabase
-            .from('orders')
-            .update({ status: 'REFUNDED' })
-            .eq('id', order_id);
+        // Call the gateway (full amount, paise) with retry + exponential backoff.
+        const amountPaise = Math.round(Number(payment.amount || order.total_price) * 100);
+        const refund = await retryAsync(
+            () => razorpay.payments.refund(payment.razorpay_payment_id, { amount: amountPaise }),
+            3,
+            1000
+        );
 
-        await supabase
-            .from('payments')
-            .update({ status: 'REFUNDED' })
-            .eq('order_id', order_id);
+        // Record the refund. UNIQUE(order_id) makes a second insert fail loudly.
+        const { error: insErr } = await supabase.from('refunds').insert({
+            order_id,
+            gateway_refund_id: refund.id,
+            status: 'REFUNDED',
+            amount: payment.amount || order.total_price,
+        });
+        if (insErr) throw insErr;
 
-        return { success: true, message: 'Refund Processed (Status Updated)' };
+        await supabase.from('orders').update({ status: 'REFUNDED' }).eq('id', order_id);
+        await supabase.from('payments').update({ status: 'REFUNDED' }).eq('order_id', order_id);
+
+        return { success: true, message: 'Refund Processed (Status Updated)', gateway_refund_id: refund.id };
     } catch (err) {
-        throw new Error("Refund Failed: " + err.message);
+        // Failure: never leave the order stuck in REFUND_PROCESSING.
+        await supabase.from('orders').update({ status: 'REFUND_FAILED' }).eq('id', order_id);
+        throw new Error('Refund Failed: ' + err.message);
     }
+}
+
+// 5. Refund Order (idempotent).
+// Atomic claim first: only the caller that flips REFUND_PENDING ->
+// REFUND_PROCESSING proceeds. Every other concurrent caller gets 0 rows
+// and returns without touching the gateway (no duplicate refund).
+exports.refundOrder = async (order_id) => {
+    const { data: claimed, error: claimError } = await supabase
+        .from('orders')
+        .update({ status: 'REFUND_PROCESSING' })
+        .eq('id', order_id)
+        .eq('status', 'REFUND_PENDING')
+        .select('*');
+    if (claimError) throw new Error('Refund Failed: ' + claimError.message);
+    const order = getSingle(claimed);
+    if (!order) {
+        return { success: true, message: 'Refund already in progress or already refunded', alreadyHandled: true };
+    }
+    return processClaimedRefund(order);
 };
 
-// 6. Auto Refund Job
+// 6. Auto Refund Job (cron-safe: overlapping runs cannot refund the same order twice)
 exports.autoRefundJob = async () => {
     try {
         const now = new Date().toISOString();
 
-        const { data: orders, error } = await supabase
+        // Step 1: Move past-deadline refundable orders into the refund queue.
+        // Idempotent (PAID/SHIPPED -> REFUND_PENDING); two runs setting the
+        // same target state is harmless.
+        const { error: enqueueError } = await supabase
             .from('orders')
-            .select('id, status')
-            .not('status', 'in', '("COMPLETED","REFUNDED","CREATED")')
+            .update({ status: 'REFUND_PENDING' })
+            .in('status', ['PAID', 'SHIPPED'])
             .lt('delivery_deadline', now);
+        if (enqueueError) throw enqueueError;
 
-        if (error) throw error;
+        // Step 2: Atomically claim a batch with FOR UPDATE SKIP LOCKED.
+        // Only this run's claimed rows are returned; a concurrent run skips them.
+        let claimed = [];
+        let claimedViaRpc = false;
+        const { data: rpcData, error: rpcError } = await supabase.rpc('claim_pending_refunds', { p_limit: 50 });
+        if (rpcError) {
+            // The migration function is not applied yet: fall back to a plain
+            // select. Safety still holds — refundOrder atomically claims each
+            // order (REFUND_PENDING -> REFUND_PROCESSING), so only one caller
+            // per order proceeds to the gateway.
+            console.warn('claim_pending_refunds RPC unavailable, falling back to per-order claim:', rpcError.message);
+            const { data: pending, error: pendingError } = await supabase
+                .from('orders')
+                .select('id')
+                .eq('status', 'REFUND_PENDING')
+                .lt('delivery_deadline', now)
+                .limit(50);
+            if (pendingError) throw pendingError;
+            claimed = pending || [];
+        } else {
+            claimed = rpcData || [];
+            claimedViaRpc = true;
+        }
 
-        for (let order of orders) {
+        // Step 3: Refund each claimed order. Rows claimed via the RPC are
+        // already REFUND_PROCESSING, so process them directly (no re-claim).
+        // Rows from the fallback select go through refundOrder's atomic claim.
+        for (let order of claimed) {
             console.log(`Auto refunding Order ID: ${order.id}...`);
             try {
-                await exports.refundOrder(order.id);
+                const res = claimedViaRpc
+                    ? await processClaimedRefund(order)
+                    : await exports.refundOrder(order.id);
+                console.log(`Auto refund ${order.id}: ${res.message}`);
             } catch (jobErr) {
                 console.error(`Error refunding order ${order.id} in cron job:`, jobErr.message);
             }
