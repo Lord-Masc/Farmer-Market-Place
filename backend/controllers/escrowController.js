@@ -69,6 +69,10 @@ exports.confirmDelivery = async (req, res) => {
 exports.refundOrder = async (req, res) => {
     try {
         const { order_id } = req.body;
+        // Enqueue first (idempotent: PAID/SHIPPED -> REFUND_PENDING), then the
+        // atomic claim inside refundOrder decides who actually processes it.
+        // Response shape unchanged: { success, message } / { error }.
+        await escrowService.markRefundPending(order_id);
         const result = await escrowService.refundOrder(order_id);
         res.status(200).json({ success: true, message: result.message });
     } catch (err) {
