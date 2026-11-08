@@ -1,7 +1,7 @@
 'use strict';
-// Shared hardening for the Express backends: allowlisted CORS, security
+// Shared hardening for the escrow backend: allowlisted CORS, security
 // headers, and a small in-memory rate limiter. No new dependencies.
-// Server/index.js reuses this module via require('../backend/middleware/security').
+// Used by backend/server.js.
 
 const cors = require('cors');
 
