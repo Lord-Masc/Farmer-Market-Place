@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { escrowFetch } from '../services/escrowApi';
 
 // ✅ Payment Success Popup
 const PaymentSuccessModal = ({ amount, onClose }) => (
@@ -93,11 +94,11 @@ const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, product
         }
 
         try {
-            // Step 1: Create backend order
-            const res = await fetch('http://localhost:5001/api/escrow/create-order', {
+            // Step 1: Create backend order (authenticated; backend validates
+            // the amount against the product price)
+            const order = await escrowFetch('/create-order', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+                body: {
                     buyer_id: buyerId,
                     seller_id: sellerId,
                     amount: amount,
@@ -107,15 +108,14 @@ const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, product
                     delivery_address: deliveryAddress,
                     buyer_phone: buyerPhone,
                     order_id: orderId
-                })
+                }
             });
 
-            const order = await res.json();
             if (!order.razorpay_order_id) throw new Error(order.error || 'Order creation failed');
 
             // Step 2: Open Razorpay
             const options = {
-                key: 'rzp_test_SY1ec4urEYvzo8',
+                key: import.meta.env.VITE_RAZORPAY_KEY_ID,
                 amount: order.amount,
                 currency: 'INR',
                 name: 'AgroConnect',
@@ -127,22 +127,24 @@ const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, product
                 modal: { escape: false },
                 handler: async (response) => {
                     // Step 3: Verify & hold payment
-                    const verify = await fetch('http://localhost:5001/api/escrow/verify-payment', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            razorpay_order_id: response.razorpay_order_id,
-                            razorpay_payment_id: response.razorpay_payment_id,
-                            razorpay_signature: response.razorpay_signature,
-                            order_id: order.order_id
-                        })
-                    });
+                    try {
+                        const verifyData = await escrowFetch('/verify-payment', {
+                            method: 'POST',
+                            body: {
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                order_id: order.order_id
+                            }
+                        });
 
-                    const verifyData = await verify.json();
-                    if (verifyData.success) {
-                        setShowSuccess(true); // ✅ Show success popup
-                    } else {
-                        setError('Payment verification failed. Please contact support.');
+                        if (verifyData.success) {
+                            setShowSuccess(true); // ✅ Show success popup
+                        } else {
+                            setError('Payment verification failed. Please contact support.');
+                        }
+                    } catch (verifyErr) {
+                        setError(verifyErr.message || 'Payment verification failed. Please contact support.');
                     }
                     setLoading(false);
                 }
