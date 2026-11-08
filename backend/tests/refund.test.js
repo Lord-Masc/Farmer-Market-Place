@@ -39,6 +39,11 @@ function makeSupabaseMock(db, options = {}) {
       if (f.type === 'eq' && row[f.col] !== f.val) return false;
       if (f.type === 'in' && !f.val.includes(row[f.col])) return false;
       if (f.type === 'lt' && !(row[f.col] < f.val)) return false;
+      if (f.type === 'is') {
+        if (f.val === null) {
+          if (row[f.col] !== null && row[f.col] !== undefined) return false;
+        } else if (row[f.col] !== f.val) return false;
+      }
       if (f.type === 'not' && f.op === 'in') {
         const list = String(f.val).replace(/[()"]/g, '').split(',').map((s) => s.trim());
         if (list.includes(row[f.col])) return false;
@@ -57,6 +62,11 @@ function makeSupabaseMock(db, options = {}) {
       return { data: rows, error: null };
     }
     if (q.op === 'update') {
+      // Test hook: force the refunds-ledger update to fail (post-gateway
+      // failure scenario). Toggle via options.failLedgerUpdate.
+      if (q.table === 'refunds' && options.failLedgerUpdate) {
+        return { data: null, error: { message: 'ledger update failed (mock)' } };
+      }
       const matched = table.filter((r) => matches(r, q.filters));
       for (const r of matched) Object.assign(r, q.fields);
       return { data: matched, error: null };
@@ -83,6 +93,7 @@ function makeSupabaseMock(db, options = {}) {
       eq(col, val) { q.filters.push({ type: 'eq', col, val }); return api; },
       in(col, val) { q.filters.push({ type: 'in', col, val }); return api; },
       lt(col, val) { q.filters.push({ type: 'lt', col, val }); return api; },
+      is(col, val) { q.filters.push({ type: 'is', col, val }); return api; },
       not(col, op, val) { q.filters.push({ type: 'not', col, op, val }); return api; },
       limit(n) { q.limit = n; return api; },
       single() { return api; },
@@ -121,10 +132,21 @@ function makeSupabaseMock(db, options = {}) {
 
 // Mock Razorpay client. refund() is a jest.fn so tests can count invocations
 // (including retry attempts). Set mock._failRefund = true to make it throw.
+// mock._gatewayRefunds lists the refunds fetchMultipleRefund returns (for
+// the idempotency / reconcile paths).
 function makeRazorpayMock() {
   const mock = {
     _failRefund: false,
+    _gatewayRefunds: [],
     payments: {
+      fetch: jest.fn(async (paymentId) => {
+        await new Promise((r) => setTimeout(r, 1));
+        return { id: paymentId, status: 'captured', amount: 49900, order_id: 'order_rzp_mock' };
+      }),
+      fetchMultipleRefund: jest.fn(async () => {
+        await new Promise((r) => setTimeout(r, 1));
+        return { items: mock._gatewayRefunds, count: mock._gatewayRefunds.length };
+      }),
       refund: jest.fn(async (paymentId, opts) => {
         await new Promise((r) => setTimeout(r, 1));
         if (mock._failRefund) throw new Error('Razorpay gateway error (mocked)');
@@ -140,12 +162,15 @@ describe('refund idempotency', () => {
   let service;
   let db;
   let rzp;
+  // Mutable per-test mock flags (failLedgerUpdate is toggled by test 6).
+  let mockOptions;
 
   beforeEach(() => {
     jest.resetModules();
     db = { orders: [], payments: [], refunds: [] };
     rzp = makeRazorpayMock();
-    mockHolder.supabase = makeSupabaseMock(db, { rpcAvailable: true });
+    mockOptions = { rpcAvailable: true, failLedgerUpdate: false };
+    mockHolder.supabase = makeSupabaseMock(db, mockOptions);
     mockHolder.razorpay = rzp;
     service = require('../services/escrowService');
   });
@@ -182,7 +207,11 @@ describe('refund idempotency', () => {
     const results = await Promise.all(
       Array.from({ length: 50 }, () => service.refundOrder(order.id)),
     );
-    expect(results.filter((r) => r.success).length).toBe(50);
+    // Exactly one caller performs the refund (it carries the gateway id);
+    // every other caller gets an honest alreadyHandled answer (already
+    // processed, or already in progress) — never a false success.
+    expect(results.filter((r) => r.success && r.gateway_refund_id).length).toBe(1);
+    expect(results.filter((r) => r.alreadyHandled).length).toBe(49);
     expect(db.refunds.length).toBe(1);
     expect(rzp.payments.refund.mock.calls.length).toBe(1);
     expect(db.orders[0].status).toBe('REFUNDED');
@@ -196,13 +225,96 @@ describe('refund idempotency', () => {
     expect(db.orders[0].status).toBe('REFUNDED');
   });
 
-  test('(4) gateway failure — order ends REFUND_FAILED, not stuck', async () => {
+  test('(4) transient gateway failure — order returns to REFUND_PENDING (retryable), not terminal', async () => {
     const order = seedOrder();
     rzp._failRefund = true;
     await expect(service.refundOrder(order.id)).rejects.toThrow(/Refund Failed/);
-    expect(db.orders[0].status).toBe('REFUND_FAILED');
-    expect(db.refunds.length).toBe(0);
+    expect(db.orders[0].status).toBe('REFUND_PENDING');
+    expect(db.orders[0].refund_attempts).toBe(1);
+    // The pending ledger row was written before the gateway call (it is how
+    // the gateway refund id is never lost); it has no gateway id yet.
+    expect(db.refunds.length).toBe(1);
+    expect(db.refunds[0].status).toBe('PENDING');
+    expect(db.refunds[0].gateway_refund_id).toBeNull();
     // 3 attempts (initial + 2 retries with exponential backoff).
     expect(rzp.payments.refund.mock.calls.length).toBe(3);
   }, 15000);
+
+  test('(5) transient failure then recovery — retry after the gateway recovers succeeds', async () => {
+    const order = seedOrder();
+    rzp._failRefund = true;
+    await expect(service.refundOrder(order.id)).rejects.toThrow(/Refund Failed/);
+    expect(db.orders[0].status).toBe('REFUND_PENDING');
+
+    rzp._failRefund = false;
+    const r = await service.refundOrder(order.id);
+    expect(r.success).toBe(true);
+    expect(r.gateway_refund_id).toBeTruthy();
+    expect(db.refunds.length).toBe(1);
+    expect(db.orders[0].status).toBe('REFUNDED');
+    expect(db.payments[0].status).toBe('REFUNDED');
+    // 3 failed attempts + 1 successful retry.
+    expect(rzp.payments.refund.mock.calls.length).toBe(4);
+  }, 15000);
+
+  test('(6) post-gateway ledger failure — order goes to REFUND_RECONCILE, reconcile completes it', async () => {
+    const order = seedOrder();
+    // Fail the refunds-ledger update (step 4) after a successful gateway call.
+    mockOptions.failLedgerUpdate = true;
+    await expect(service.refundOrder(order.id)).rejects.toThrow(/Refund Failed/);
+    expect(db.orders[0].status).toBe('REFUND_RECONCILE');
+    expect(rzp.payments.refund.mock.calls.length).toBe(1);
+    // The gateway refund exists; the ledger row is still PENDING with no id.
+    expect(db.refunds.length).toBe(1);
+    expect(db.refunds[0].status).toBe('PENDING');
+    expect(db.refunds[0].gateway_refund_id).toBeNull();
+
+    // The reconciler finds the gateway refund by listing the payment's
+    // refunds and completes the ledger + statuses (no second gateway call).
+    mockOptions.failLedgerUpdate = false;
+    rzp._gatewayRefunds = [{ id: 'rfnd_mock_1', amount: 49900 }];
+    await service.reconcileRefunds();
+    expect(db.orders[0].status).toBe('REFUNDED');
+    expect(db.payments[0].status).toBe('REFUNDED');
+    expect(db.refunds[0].gateway_refund_id).toBe('rfnd_mock_1');
+    expect(db.refunds[0].status).toBe('REFUNDED');
+    expect(rzp.payments.refund.mock.calls.length).toBe(1);
+  });
+
+  test('(7) honest alreadyHandled — a failed refund reports success:false, not success', async () => {
+    const order = seedOrder();
+    // Permanent failure: no payment row, so the refund can never proceed.
+    db.payments.length = 0;
+    await expect(service.refundOrder(order.id)).rejects.toThrow(/Refund Failed/);
+    expect(db.orders[0].status).toBe('REFUND_FAILED');
+
+    const r = await service.refundOrder(order.id);
+    expect(r.success).toBe(false);
+    expect(r.alreadyHandled).toBe(true);
+    expect(r.code).toBe('REFUND_NOT_PENDING');
+    expect(rzp.payments.refund.mock.calls.length).toBe(0);
+  });
+
+  test('(8) NULL delivery deadline — auto-refund enqueues and refunds the order', async () => {
+    const order = seedOrder({ status: 'PAID' });
+    order.delivery_deadline = null;
+    await service.autoRefundJob();
+    expect(db.refunds.length).toBe(1);
+    expect(rzp.payments.refund.mock.calls.length).toBe(1);
+    expect(db.orders[0].status).toBe('REFUNDED');
+  });
+
+  test('(9) existing gateway refund is reused — no second gateway call', async () => {
+    const order = seedOrder();
+    // An earlier attempt created the gateway refund but timed out before
+    // the ledger recorded it.
+    rzp._gatewayRefunds = [{ id: 'rfnd_existing_1', amount: 49900 }];
+    const r = await service.refundOrder(order.id);
+    expect(r.success).toBe(true);
+    expect(r.gateway_refund_id).toBe('rfnd_existing_1');
+    expect(rzp.payments.refund.mock.calls.length).toBe(0);
+    expect(db.refunds.length).toBe(1);
+    expect(db.refunds[0].gateway_refund_id).toBe('rfnd_existing_1');
+    expect(db.orders[0].status).toBe('REFUNDED');
+  });
 });
