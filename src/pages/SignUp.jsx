@@ -18,16 +18,19 @@ const SignUp = () => {
   const [agreed, setAgreed] = useState(false);
   
   const [error, setError] = useState(null);
+  const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(false);
 
   // Clear errors when switching roles
   React.useEffect(() => {
     setError(null);
+    setMessage(null);
   }, [role]);
 
   const handleSignUp = async (e) => {
     e.preventDefault();
     setError(null);
+    setMessage(null);
 
     // Validation
     if (!validateName(firstName) || !validateName(lastName)) {
@@ -67,9 +70,22 @@ const SignUp = () => {
       }
 
       // Step 2: Sign up with Supabase Auth
+      // Profile fields go as user_metadata: the database trigger
+      // (handle_new_user on auth.users) creates the profiles row from
+      // them, so signup works even when email confirmation is on and
+      // there is no session yet (the old direct insert failed RLS then).
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            phone_number: phone,
+            role,
+            state: role === 'farmer' ? state : null,
+          },
+        },
       });
 
       if (signUpError) {
@@ -88,35 +104,21 @@ const SignUp = () => {
       const userId = data?.user?.id;
 
       if (userId) {
-        // Step 3: Insert or update the role profile
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert([
-            {
-              id: userId,
-              first_name: firstName,
-              last_name: lastName,
-              email_address: email,
-              phone_number: phone,
-              role: role,
-              state: role === 'farmer' ? state : null,
-            }
-          ]);
-          
-        if (profileError) {
-            if (profileError.code === '23505') { // Unique constraint violation
-                setError('Could not create an account with these details. If you already have an account, please log in.');
-                setLoading(false);
-                return;
-            }
-          console.error("Profile creation error:", profileError);
-          setError(profileError.message);
+        // Step 3: the profiles row is created by the database trigger
+        // (handle_new_user on auth.users) from the user_metadata above —
+        // no direct insert here (it failed RLS when email confirmation
+        // is on, because there is no session yet).
+        if (data?.session) {
+          // Signed in already — profile exists via the trigger.
+          navigate(`/${role}-dashboard`);
+        } else {
+          // Email confirmation required: no session yet. Ask the user
+          // to confirm, then log in (the profile is created by the
+          // trigger at signup, so login works after confirmation).
+          setMessage('Account created. Please check your email to confirm your account, then log in.');
           setLoading(false);
           return;
         }
-        
-        // Redirect to dashboard after successful signup and profile creation
-        navigate(`/${role}-dashboard`);
       }
 
     } catch (err) {
@@ -164,6 +166,12 @@ const SignUp = () => {
         {error && (
           <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl font-medium text-center">
             {error}
+          </div>
+        )}
+
+        {message && (
+          <div className="mb-6 p-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl font-medium text-center">
+            {message}
           </div>
         )}
 
