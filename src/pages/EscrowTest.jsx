@@ -7,6 +7,20 @@ import Footer from '../components/Footer';
 const EscrowTest = () => {
     const [searchParams] = useSearchParams();
 
+    // Dev-only test page: never render the unauthenticated checkout
+    // harness in a production build.
+    if (!import.meta.env.DEV) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex flex-col">
+                <Navbar />
+                <main className="flex-grow flex items-center justify-center">
+                    <p className="text-slate-500 font-bold">Not available</p>
+                </main>
+                <Footer />
+            </div>
+        );
+    }
+
     // Fetch dynamic parameters from URL
     const dynamicData = {
         orderId: searchParams.get('orderId') || '',
