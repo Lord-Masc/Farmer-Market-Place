@@ -1,10 +1,9 @@
 -- Security hardening migration (Farmer Marketplace escrow).
 -- APPLY IN THE SUPABASE SQL EDITOR AFTER DEPLOYING THE 2026-11-08 SECURITY FIX.
--- Run the statements top to bottom; if one fails, read its comment — the live
--- schema has drifted from supabase_backend/schema.sql (stale), so a statement
--- that references a column the live table lacks will fail. Fix that section
--- against the live column list and re-run the rest. Do NOT edit
--- supabase_backend/schema.sql (it is stale — the live tables differ).
+-- Run the statements top to bottom; if one fails, read its comment — the
+-- statements were written against the live column list (reconstructed in
+-- 20261108_base_schema.sql), so a failure means a column is missing.
+-- Fix that section against the live column list and re-run the rest.
 --
 -- What this does:
 --  1. Locks the claim_pending_refunds RPC to the service role (it was

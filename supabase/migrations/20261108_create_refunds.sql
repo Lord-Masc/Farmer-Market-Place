@@ -2,7 +2,6 @@
 -- APPLY IN THE SUPABASE SQL EDITOR BEFORE DEPLOYING THE REFUND FIX.
 -- The fix's code assumes this migration is applied (refunds table,
 -- payments.razorpay_payment_id, claim_pending_refunds function).
--- Do NOT edit supabase_backend/schema.sql (it is stale — the live tables differ).
 
 -- 1. Refunds ledger: exactly one row per order, enforced by UNIQUE(order_id).
 --    gateway_refund_id is the Razorpay refund id; status is REFUNDED / REFUND_FAILED.
