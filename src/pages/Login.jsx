@@ -36,7 +36,9 @@ const Login = () => {
           .single();
 
         if (profileError || !profile) {
-          setError(`No ${role} account found with this phone number.`);
+          // Generic message: never reveal whether an account exists for
+          // this phone number (same text as a wrong password).
+          setError('Invalid credentials. Please check your phone number and password.');
           setLoading(false);
           return;
         }
@@ -53,7 +55,13 @@ const Login = () => {
       });
 
       if (signInError) {
-        setError(signInError.message);
+        // Keep wrong-password failures indistinguishable from an unknown
+        // identifier: same generic message either way.
+        if (signInError.message.includes('Invalid login credentials')) {
+          setError('Invalid credentials. Please check your phone number and password.');
+        } else {
+          setError(signInError.message);
+        }
         setLoading(false);
         return;
       }

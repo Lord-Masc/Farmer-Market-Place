@@ -59,7 +59,9 @@ const SignUp = () => {
         .maybeSingle();
 
       if (existingUser) {
-        setError(`This email is already registered as a ${existingUser.role}. Please use a different email or log in.`);
+        // Generic message: never reveal whether the email is registered
+        // or which role it has.
+        setError('Could not create an account with these details. If you already have an account, please log in.');
         setLoading(false);
         return;
       }
@@ -72,7 +74,8 @@ const SignUp = () => {
 
       if (signUpError) {
         if (signUpError.message.includes('already registered')) {
-          setError('This email is already in use by another account.');
+          // Generic message: do not confirm whether the email exists.
+          setError('Could not create an account with these details. If you already have an account, please log in.');
         } else if (signUpError.message.includes('rate limit')) {
           setError('Too many sign-up attempts. Please wait a few minutes.');
         } else {
@@ -102,7 +105,7 @@ const SignUp = () => {
           
         if (profileError) {
             if (profileError.code === '23505') { // Unique constraint violation
-                setError(`You already have a ${role} profile with this account.`);
+                setError('Could not create an account with these details. If you already have an account, please log in.');
                 setLoading(false);
                 return;
             }

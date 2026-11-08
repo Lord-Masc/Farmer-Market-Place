@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { escrowFetch } from '../services/escrowApi';
+import { validateImageFile } from '../utils/fileValidation';
 
 const FarmerDashboard = () => {
   const { user, signOut } = useAuth();
@@ -57,7 +59,8 @@ const FarmerDashboard = () => {
     const fallbackGeocode = async (lat, lng) => {
         try {
             // (1) Attempt Direct Google API (Might hit CORS)
-            const apiKey = 'AIzaSyBB7MHzXVXJVyBfuWfd5zvVI1KSLOcNM1A';
+            const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+            if (!apiKey) throw new Error('Google Maps API key not configured');
             const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`);
             const data = await res.json();
             if (data.results && data.results[0]) {
@@ -296,6 +299,9 @@ const FarmerDashboard = () => {
   };
 
   const uploadPhoto = async (file) => {
+    const validationError = validateImageFile(file);
+    if (validationError) throw new Error(validationError);
+
     const fileExt = file.name.split('.').pop();
     const fileName = `${user.id}-${Math.random()}.${fileExt}`;
     const filePath = `product-items/${fileName}`;
@@ -315,6 +321,19 @@ const FarmerDashboard = () => {
 
   const handlePublishProduct = async (e) => {
     e.preventDefault();
+
+    // Validate price / quantity before any upload or DB write.
+    const parsedPrice = parseFloat(formData.user_price);
+    const parsedQuantity = parseFloat(formData.quantity);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+        alert("Please enter a valid selling price greater than 0.");
+        return;
+    }
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+        alert("Please enter a valid quantity greater than 0.");
+        return;
+    }
+
     if (!editingProduct && (!photo1 || !photo2)) {
         alert("Please upload 2 photos.");
         return;
@@ -347,12 +366,14 @@ const FarmerDashboard = () => {
                         pLng = result.lng();
                     }
                 } else {
-                    const apiKey = 'AIzaSyBB7MHzXVXJVyBfuWfd5zvVI1KSLOcNM1A';
-                    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(formData.address)}&key=${apiKey}`);
-                    const data = await res.json();
-                    if (data.results?.[0]) {
-                        pLat = data.results[0].geometry.location.lat;
-                        pLng = data.results[0].geometry.location.lng;
+                    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+                    if (apiKey) {
+                        const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(formData.address)}&key=${apiKey}`);
+                        const data = await res.json();
+                        if (data.results?.[0]) {
+                            pLat = data.results[0].geometry.location.lat;
+                            pLng = data.results[0].geometry.location.lng;
+                        }
                     }
                 }
             } catch (err) {
@@ -369,8 +390,8 @@ const FarmerDashboard = () => {
         const productData = {
             ...formData,
             farmer_id: user.id,
-            user_price: parseFloat(formData.user_price),
-            quantity: parseFloat(formData.quantity),
+            user_price: parsedPrice,
+            quantity: parsedQuantity,
             image_url_1: url1,
             image_url_2: url2,
             gov_price: 0,
@@ -379,7 +400,10 @@ const FarmerDashboard = () => {
         };
 
         if (editingProduct) {
-            const { error } = await supabase.from('products').update(productData).eq('id', editingProduct.id);
+            // Never let the client reassign ownership: farmer_id stays out
+            // of the update payload, and the update is scoped to the owner.
+            const { farmer_id: _farmerId, ...updateData } = productData;
+            const { error } = await supabase.from('products').update(updateData).eq('id', editingProduct.id).eq('farmer_id', user.id);
             if (error) throw error;
             setListingSuccessMsg("Crop Updated Successfully! 🚜✨");
             setShowListingSuccess(true);
@@ -425,10 +449,23 @@ const FarmerDashboard = () => {
 
   const handleDeleteProduct = async () => {
     if (!productToDelete) return;
-    
+
     setIsDeleting(true);
     try {
-        const { error } = await supabase.from('products').delete().eq('id', productToDelete.id);
+        // Refuse while any non-cancelled / non-declined order references it.
+        const { data: activeOrders, error: ordersError } = await supabase
+            .from('orders')
+            .select('id')
+            .eq('product_id', productToDelete.id)
+            .not('status', 'in', '(cancelled,declined)')
+            .limit(1);
+
+        if (ordersError) throw ordersError;
+        if (activeOrders && activeOrders.length > 0) {
+            throw new Error("Cannot delete this product because there are active orders for it. 📦 Please fulfill or cancel those orders first.");
+        }
+
+        const { error } = await supabase.from('products').delete().eq('id', productToDelete.id).eq('farmer_id', user.id);
         
         if (error) {
             // Detailed error handling for foreign key constraint (if product has orders)
@@ -460,51 +497,24 @@ const FarmerDashboard = () => {
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     if (!orderId || !newStatus) return;
-    
+
     setProcessingOrders(prev => ({ ...prev, [orderId]: true }));
     try {
-        // Step 1: Fetch the order + product details (uses farmer's auth session — RLS OK)
-        const { data: orderData, error: orderError } = await supabase
-            .from('orders')
-            .select('*, product:products(*)')
-            .eq('id', orderId)
-            .single();
-
-        if (orderError) throw new Error("Order not found: " + orderError.message);
-        if (orderData.farmer_id !== user.id) throw new Error("Unauthorized: This order doesn't belong to you.");
-
-        // Step 2: If approving ('confirmed'), reduce product stock
-        if (newStatus === 'confirmed' && (orderData.status === 'pending' || orderData.status === 'CREATED')) {
-            const orderQty = orderData.unit_at_order === 'quintal' ? (orderData.quantity * 100) : (orderData.quantity || 0);
-            const currentStock = orderData.product?.quantity || 0;
-
-            if (currentStock < orderQty) {
-                throw new Error(`🚨 Not Enough Stock: You only have ${currentStock} KG available.`);
-            }
-
-            // Reduce Stock
-            const { error: stockError } = await supabase
-                .from('products')
-                .update({ quantity: currentStock - orderQty })
-                .eq('id', orderData.product_id);
-
-            if (stockError) throw new Error("Stock update failed: " + stockError.message);
-        }
-
-        // Step 3: Update order status (uses farmer's auth session — RLS OK)
-        const { error: updateError } = await supabase
-            .from('orders')
-            .update({ status: newStatus })
-            .eq('id', orderId);
-
-        if (updateError) throw new Error("Status update failed: " + updateError.message);
+        // Order status (incl. stock decrement + transition rules) is owned
+        // by the escrow backend, which applies it atomically and enforces
+        // the allowed-transition map for the authenticated farmer.
+        // escrowFetch throws (with the backend's error message) on rejection.
+        await escrowFetch('/update-status', {
+            method: 'POST',
+            body: { orderId, newStatus }
+        });
 
         // UI Update
         setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
-        
+
         // Data Refresh
         fetchMyOrders();
-        fetchMyProducts(); 
+        fetchMyProducts();
 
     } catch (err) {
         console.error("Status update failed:", err);
@@ -861,6 +871,8 @@ const FarmerDashboard = () => {
                              <input type="file" className="hidden" onChange={async (e) => {
                                  const file = e.target.files[0];
                                  if (file) {
+                                     const validationError = validateImageFile(file);
+                                     if (validationError) { alert(validationError); return; }
                                      try {
                                          const fileName = `farmer-p-${user.id}-${Date.now()}`;
                                          const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
@@ -1104,7 +1116,7 @@ const FarmerDashboard = () => {
                   </div>
                   <form onSubmit={handlePublishProduct} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto max-h-[70vh]">
                       <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Crop Name</label><input required className="w-full bg-cream rounded-xl p-4 mt-1 border" placeholder="Wheat..." value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-                      <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" className="w-full bg-cream rounded-xl p-4 mt-1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} /></div>
+                      <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" min="1" step="1" className="w-full bg-cream rounded-xl p-4 mt-1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} /></div>
                       <div><label className="text-xs font-bold uppercase text-gray-400">Unit</label><select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})}><option>kg</option><option>quintal</option></select></div>
                       <div className="md:col-span-2">
                         <label className="text-xs font-bold uppercase text-gray-400 font-black tracking-widest">Crop Category</label>
@@ -1136,7 +1148,7 @@ const FarmerDashboard = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Selling Price</label><input required type="number" className="w-full bg-cream rounded-xl p-4 mt-1 border-2 border-green-fresh" placeholder="₹" value={formData.user_price} onChange={e => setFormData({...formData, user_price: e.target.value})} /></div>
+                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Selling Price</label><input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1 border-2 border-green-fresh" placeholder="₹" value={formData.user_price} onChange={e => setFormData({...formData, user_price: e.target.value})} /></div>
                       <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Harvest Address</label><textarea required className="w-full bg-cream rounded-xl p-4 mt-1 border min-h-[80px]" placeholder="Specific field location, village, or warehouse address..." value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
                       <div className="md:col-span-2 grid grid-cols-2 gap-4">
                           <label className="col-span-2 text-xs font-bold uppercase text-gray-400">Crop Photos {editingProduct && '(Leave empty to keep current)'}</label>

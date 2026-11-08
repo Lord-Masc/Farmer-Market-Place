@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { escrowFetch } from '../services/escrowApi';
+import { validateImageFile } from '../utils/fileValidation';
 
 const BuyerDashboard = () => {
   const { user, signOut } = useAuth();
@@ -49,7 +51,8 @@ const BuyerDashboard = () => {
     const fallbackGeocode = async (lat, lng) => {
         try {
             // (1) Attempt Direct Google API (Might hit CORS)
-            const apiKey = 'AIzaSyBB7MHzXVXJVyBfuWfd5zvVI1KSLOcNM1A';
+            const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+            if (!apiKey) throw new Error('Google Maps API key not configured');
             const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`);
             const data = await res.json();
             if (data.results && data.results[0]) {
@@ -426,12 +429,10 @@ const BuyerDashboard = () => {
 
   const handleConfirmDelivery = async (id) => {
     try {
-        const res = await fetch('http://localhost:5001/api/escrow/confirm-delivery', {
+        const data = await escrowFetch('/confirm-delivery', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ order_id: id })
+            body: { order_id: id }
         });
-        const data = await res.json();
         if(data.success) {
             setConfirmModal({ show: false, orderId: null });
             setStatusMessage({ show: true, type: 'success', text: 'Success! Payment Released to Farmer. 🌾✅' });
@@ -906,6 +907,8 @@ const BuyerDashboard = () => {
                              <input type="file" className="hidden" onChange={async (e) => {
                                  const file = e.target.files[0];
                                  if (file) {
+                                     const validationError = validateImageFile(file);
+                                     if (validationError) { alert(validationError); return; }
                                      try {
                                          const fileName = `buyer-${user.id}-${Date.now()}`;
                                          const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
@@ -1290,10 +1293,12 @@ const BuyerDashboard = () => {
                               });
                               if (res) { lat = res.lat(); lng = res.lng(); }
                           } else {
-                              const apiKey = 'AIzaSyBB7MHzXVXJVyBfuWfd5zvVI1KSLOcNM1A';
-                              const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`);
-                              const data = await r.json();
-                              if (data.results?.[0]) { lat = data.results[0].geometry.location.lat; lng = data.results[0].geometry.location.lng; }
+                              const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+                              if (apiKey) {
+                                  const r = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`);
+                                  const data = await r.json();
+                                  if (data.results?.[0]) { lat = data.results[0].geometry.location.lat; lng = data.results[0].geometry.location.lng; }
+                              }
                           }
 
                           if (lat && lng) {
