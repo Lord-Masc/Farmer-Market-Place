@@ -1,5 +1,11 @@
 # Refund Idempotency — Before/After Report
 
+> Update 2026-11-08 19:19 IST: the AFTER live run is now MEASURED
+> too (see Step 4) — the Before/After table below is complete with
+> real live numbers on both sides. BEFORE: 50 requests, 49 duplicates,
+> ₹0 moved (no gateway call). AFTER: 50 requests, 0 duplicates,
+> ₹499 refunded exactly once (verified at Razorpay).
+
 Repo: `r1shabhsharma05/Farmer-Market-Place` (branch `main`)
 Date: 2026-11-08
 Scope: `backend/` escrow refund flow — `POST /refund` + hourly auto-refund cron
@@ -56,7 +62,25 @@ Farmer approval uses lowercase `pending`/`confirmed` (inconsistent casing, pre-e
 
 ## Step 2 — BEFORE result (concurrency reproduction)
 
-**Status: BLOCKED — could not be measured from this VM. No BEFORE numbers exist.**
+**Status: MEASURED — live run 2026-11-08 17:15 IST against the NEW Supabase project (`prrshenqceqijkfapthl`). Pre-fix code at commit `45cff5c`, run from a disposable git worktree (`~/workspace/tmp-work/live-test`) with the new project's service key (transient use only, never recorded).**
+
+| Metric | Measured |
+|---|---|
+| Requests sent | 50 |
+| HTTP success | 50 (all 50 refund requests for ONE order returned success) |
+| HTTP failed | 0 |
+| Overlapping cron runs | 2 |
+| Refund rows created | 0 (no refunds ledger existed in the old code) |
+| Total refunded | ₹0 (old code never called Razorpay — no money moved) |
+| p95 latency | 26,704 ms |
+| Order status after | REFUNDED |
+| Payment status after | REFUNDED |
+
+Reading: all 50 parallel refund requests for a single ₹499 order succeeded — 49 of them were duplicates. The old code kept no record (no ledger, no gateway id), so nothing stopped the 2nd…50th refund. No money moved only because the old code had no gateway call at all; had it called Razorpay once per success, it would have refunded 50 × ₹499 = ₹24,950 (₹24,451 over-refunded). That counterfactual is a projection, not a measurement — the measured over-refund is ₹0. Cleanup verified: 0 test rows and 0 test auth users left behind.
+
+Harness notes (worktree-only, the committed script is untouched): the test script needed three small fixes to run against the new schema — profiles.id has no DEFAULT (it is a FK to auth.users, so the run creates a throwaway auth user and uses its id), profiles.email_address is NOT NULL (a per-run test email is used), and products has no `status`/`stock` columns (the run uses `quantity` + `user_price`, which the live schema has). The refund logic under measurement is unchanged. Full raw output saved at `~/workspace/tmp-work/live-test/BEFORE-result.json`.
+
+*Earlier attempt 2026-11-08 ~02:03 IST (OLD project) — blocked, kept for the record:*
 
 The script `scripts/refund-concurrency-test.js` was written and run (2026-11-08 ~02:03 IST). It failed fast at the first Supabase call:
 
@@ -70,7 +94,25 @@ The script `scripts/refund-concurrency-test.js` was written and run (2026-11-08 
 
 ## Step 4 — AFTER result (concurrency re-run after the fix)
 
-**Live re-run status: BLOCKED — same as BEFORE. No AFTER numbers exist.**
+**Status: MEASURED — live run 2026-11-08 19:19 IST against the NEW Supabase project (`prrshenqceqijkfapthl`). Fixed code at commit `b83a11b`, run from the same disposable git worktree (`~/workspace/tmp-work/live-test`) with the new project's service key (transient use only, never recorded) and a fresh Razorpay TEST payment (`pay_TxhbJ7SigSoSX0`, ₹499, captured 19:15 IST).**
+
+| Metric | Measured |
+|---|---|
+| Requests sent | 50 |
+| HTTP success | 50 (the refund endpoint queues idempotently and returns 200; the dedup happens at the claim + ledger, see below) |
+| HTTP failed | 0 |
+| Overlapping cron runs | 2 |
+| Refund rows created | 1 |
+| Total refunded | ₹499 (exactly once) |
+| p95 latency | 19,744 ms |
+| Order status after | REFUNDED |
+| Payment status after | REFUNDED |
+
+Reading: 50 parallel refund requests for a single ₹499 order produced exactly ONE refund row and ONE gateway refund — verified at Razorpay itself (payment `pay_TxhbJ7SigSoSX0` now shows status `refunded`, `amount_refunded` 49900, `refund_status` full; exactly one refund `rfnd_TxhfdaZRsSwf5v`, ₹499, processed). The atomic claim (`REFUND_PENDING` → `REFUND_PROCESSING`) let one caller through and the `UNIQUE(order_id)` ledger blocked every duplicate. p95 improved from 26,704 ms (BEFORE) to 19,744 ms — less row-lock contention once duplicates stop piling onto the same order. Cleanup verified: 0 test rows and 0 test auth users left behind.
+
+Getting here took two environment fixes (worktree-only harness, not repo code): (1) the Razorpay SDK (axios) cannot reach `api.razorpay.com` from this VM — axios's built-in proxy handling breaks on Node 24 and direct egress is blocked — so the run preloads a proxy shim (`NODE_OPTIONS='-r proxy-preload.js'`) that sets `axios.defaults.proxy = false` plus an `HttpsProxyAgent` as the default `httpsAgent`; (2) the committed Razorpay test keys returned 401, so the test keys were regenerated on the user's order (new key id `rzp_test_TxfzQ4VHMWadYH`) and the first test payment's refund was capped by the test-mode balance (max refundable = payment − fee = ₹488.02), so two fresh ₹499 test payments were created to build enough balance for a full ₹499 refund. The first payment (`pay_TxfktzUtPVz8F5`) was fully refunded during diagnosis (₹1 + ₹487.02) and is not used for the AFTER numbers. Full raw output saved at `~/workspace/tmp-work/live-test/AFTER-result.json`.
+
+*Earlier attempt 2026-11-08 ~02:07 IST (OLD project) — blocked, kept for the record:*
 
 The same script (`scripts/refund-concurrency-test.js`) was re-run against the FIXED code (2026-11-08 ~02:07 IST). It failed identically at the first Supabase call:
 
@@ -92,24 +134,24 @@ The same script (`scripts/refund-concurrency-test.js`) was re-run against the FI
 
 These are unit tests, not the live concurrency run. The mock models Postgres semantics faithfully (the atomic `UPDATE … WHERE status='REFUND_PENDING'` executes synchronously in one tick, like a row-locked UPDATE), so the concurrency logic is genuinely exercised — but the numbers are from the mocked harness, not from live Supabase. They are labelled as such and must not be quoted as live production numbers.
 
-**To get the live BEFORE/AFTER numbers**, run `node scripts/refund-concurrency-test.js` from a machine that can reach the live Supabase host (e.g. Rishabh's laptop), after applying `supabase/migrations/20261108_create_refunds.sql` in the Supabase SQL editor and setting a real Razorpay test-mode payment id in `TEST_RAZORPAY_PAYMENT_ID`.
+**Both live runs are now done (BEFORE 17:15 IST, AFTER 19:19 IST)** — see the table below. A fresh live run is only needed if the refund code changes; it needs a real Razorpay test-mode payment id in `TEST_RAZORPAY_PAYMENT_ID` and the VM proxy shim for the Razorpay SDK (see Step 4).
 
 ## Before / After table (live concurrency run)
 
 | Metric | Before | After |
 |---|---|---|
-| Requests sent | not measured (live Supabase unreachable from VM) | not measured (live Supabase unreachable from VM) |
-| Duplicate refunds | not measured | not measured |
-| Total over-refunded amount | not measured | not measured |
-| p95 latency | not measured | not measured |
+| Requests sent | 50 | 50 |
+| Duplicate refunds | 50 successes for 1 order (49 duplicates) | 0 duplicates — exactly 1 refund row, 1 gateway refund |
+| Total over-refunded amount | ₹0 measured (old code never called the gateway; 50 successes would have refunded ₹24,950) | ₹0 over-refunded — ₹499 refunded exactly once (verified at Razorpay: rfnd_TxhfdaZRsSwf5v) |
+| p95 latency | 26,704 ms | 19,744 ms |
 
-_No live numbers exist for this table. Both the BEFORE and AFTER live runs failed at the first Supabase call (`SUPABASE_UNREACHABLE`, exit 2, 0 requests sent) because this VM's egress proxy cannot reach the live Supabase project host. Nothing in this table is estimated or invented._
+_Both columns are live measurements: BEFORE from the 2026-11-08 17:15 IST run (Step 2), AFTER from the 2026-11-08 19:19 IST run (Step 4). Nothing in this table is estimated or invented._
 
 **Measured numbers that DO exist (Jest unit tests, mocked — see Step 4):** 4/4 tests passed; 50 parallel refund calls → exactly 1 gateway call, 1 refund row, 0 duplicates; 2 overlapping cron runs → 1 refund row, 1 gateway call; gateway failure → order REFUND_FAILED after 3 attempts. These are unit-test measurements, not live production numbers.
 
 ## Summary
 
 - **Fix implemented and committed** (Step 3): atomic claim (`UPDATE … WHERE status='REFUND_PENDING'`), `refunds` ledger with `UNIQUE(order_id)`, real Razorpay refund call with retry + exponential backoff, cron batch claim via `FOR UPDATE SKIP LOCKED` (with per-order atomic-claim fallback), failure → `REFUND_FAILED`. API response shape unchanged (`{success, message}` / `{error}`).
-- **Live concurrency numbers: NOT measured.** The test was designed for real Supabase + real Razorpay test mode (no mocks), but this VM cannot reach the live Supabase project host (egress proxy returns "Empty reply from server" on every path). Both the BEFORE and AFTER live runs failed at the first Supabase call (exit 2, 0 requests sent, 0 rows written). No live numbers are claimed anywhere in this report.
-- **Migration prerequisite:** `supabase/migrations/20261108_create_refunds.sql` MUST be applied in the Supabase SQL editor before the fix goes live (it creates the `refunds` table, adds `payments.razorpay_payment_id`, and creates `claim_pending_refunds`). The migration was NOT applied by this task (no live Supabase access from this VM) and was NOT validated against a live database.
-- **How to get the live BEFORE/AFTER numbers:** from a machine that can reach the live Supabase host, apply the migration, set a real Razorpay test-mode payment id in `TEST_RAZORPAY_PAYMENT_ID`, then run `node scripts/refund-concurrency-test.js` before and after deploying the fix.
+- **Live concurrency numbers: BOTH measured (BEFORE 2026-11-08 17:15 IST, AFTER 2026-11-08 19:19 IST).** BEFORE: 50 requests sent, 50 succeeded (49 duplicates), 0 refund rows, ₹0 refunded (no gateway call in old code), p95 26,704 ms. AFTER: 50 requests sent, 50 succeeded, 1 refund row, ₹499 refunded exactly once (verified at Razorpay: one refund `rfnd_TxhfdaZRsSwf5v`, payment `refunded`/`full`), p95 19,744 ms. The fix works end to end.
+- **Migration prerequisite:** all three migrations in `supabase/migrations/` are applied on the NEW Supabase project (`prrshenqceqijkfapthl`, 2026-11-08, all "Success. No rows returned", all 7 tables verified). The old note that the migration "was NOT applied" referred to the OLD project and no longer applies.
+- **How the live AFTER number was obtained:** a real Razorpay test-mode payment id (`pay_TxhbJ7SigSoSX0`, ₹499) in `TEST_RAZORPAY_PAYMENT_ID`, run at the fix commit `b83a11b` (see `docs/LIVE-TEST.md` Step 2), with the VM proxy shim for the Razorpay SDK (see Step 4). Both runs are done; no further live run is needed unless the refund code changes.

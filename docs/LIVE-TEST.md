@@ -1,11 +1,14 @@
 # Live Test Runbook — Refund Idempotency (Before / After)
 
-Run this from a machine that can reach the live Supabase host
-(e.g. Rishabh's laptop). **Do NOT run it from this VM** — the live
-Supabase host is unreachable from the VM (curl returns 000, "Empty
-reply from server"), so the script fails before sending a single
-request there. Razorpay's API is reachable from the VM, but the
-Supabase block stops the test.
+Run this against the NEW Supabase project (`prrshenqceqijkfapthl`,
+created 2026-11-08 on the 14426 account). The VM **can** reach the
+new project's host (verified 2026-11-08: `/` returns 404,
+`/auth/v1/health` returns 401 — real HTTP responses), so this script
+can run from the VM now. (The OLD project's host,
+`ibelaipphuggkncovptw.supabase.co`, was unreachable from the VM —
+curl 000, "Empty reply from server" — which is why this runbook used
+to say "run it from a laptop".) Razorpay's API is reachable from the
+VM.
 
 ## Commits
 
@@ -15,18 +18,26 @@ Supabase block stops the test.
   (`b83a11b` — "Make refunds idempotent: atomic claim, refunds ledger,
   gateway call with retry")
 
-## Prerequisite — apply the migration first
+## Prerequisite — apply the migrations first
 
-1. Open the Supabase dashboard → SQL editor.
-2. Paste the contents of `supabase/migrations/20261108_create_refunds.sql`
-   and run it. This creates the `refunds` table (UNIQUE on `order_id`),
-   adds `payments.razorpay_payment_id`, and creates the
+On a FRESH Supabase project, apply all three migrations in
+`supabase/migrations/` in order in the SQL editor:
+
+1. `20261108_base_schema.sql` — profiles, products, orders,
+   payments, group_buys, group_buy_participants (+ RLS).
+2. `20261108_create_refunds.sql` — the `refunds` table (UNIQUE on
+   `order_id`), `payments.razorpay_payment_id`, and the
    `claim_pending_refunds` function (FOR UPDATE SKIP LOCKED).
-3. Confirm the table exists: `SELECT * FROM public.refunds LIMIT 1;`
-   should return 0 rows (empty table, no error).
+3. `20261109_security_hardening.sql` — service-role-only RPC lock,
+   refund retry columns, payments UNIQUE, policy replacements, CHECKs.
 
-Do NOT skip this step. The fixed code assumes the migration is applied;
-without it the AFTER run will fail on the missing `refunds` table.
+On the new project (`prrshenqceqijkfapthl`) all three are already
+applied (2026-11-08) — just confirm the tables exist:
+`SELECT * FROM public.refunds LIMIT 1;` should return 0 rows
+(empty table, no error).
+
+Do NOT skip this step. The fixed code assumes the migrations are
+applied; without them the AFTER run will fail on the missing tables.
 
 ## Prerequisite — a Razorpay TEST-mode payment id
 
@@ -96,9 +107,11 @@ then its payments row, then its refunds row).
 
 ## Known blockers
 
-- Live Supabase host unreachable from this VM (curl 000). Run the
-  script from a machine that can reach it.
 - `TEST_RAZORPAY_PAYMENT_ID` must be set, or the AFTER run lands in
   `REFUND_FAILED`.
-- The migration must be applied before the AFTER run, or the script
-  fails on the missing `refunds` table.
+- The migrations must be applied before the AFTER run, or the script
+  fails on the missing tables.
+- The BEFORE/AFTER commits below are from the refund-fix work
+  (2026-11-08). They predate the rebuild: the fix code they test is
+  the same, but the live database is now the NEW Supabase project
+  (`prrshenqceqijkfapthl`), not the old one.
