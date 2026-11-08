@@ -1,0 +1,30 @@
+# Farmer Marketplace — escrow backend on Render (Blueprint).
+# Frontend is on Vercel (farmer-market-place-mu.vercel.app); its origin is
+# already in the backend's default CORS allowlist, so no FRONTEND_URL needed.
+# Secrets below are placeholders (sync: false) — set real values in the
+# Render dashboard, never in this file.
+services:
+  - type: web
+    name: farmer-escrow-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      # Bounded range, not an exact pin: Render docs (checked 2026-11-08)
+      # list Node 22/24 as active LTS, 20 EOL, new services default 24.14.1,
+      # and NODE_VERSION accepts ranges. An exact pin goes stale (it broke
+      # SecureGaurd when Render discontinued Node 20.x); a range cannot.
+      - key: NODE_VERSION
+        value: ">=22 <25"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
