@@ -55,13 +55,17 @@ export const productService = {
     return data;
   },
 
-  // Delete a product
-  async deleteProduct(id) {
-    const { error } = await supabase
+  // Delete a product (owner-scoped when the caller's farmer id is given)
+  async deleteProduct(id, farmerId) {
+    let query = supabase
       .from('products')
       .delete()
       .eq('id', id);
-    
+
+    if (farmerId) query = query.eq('farmer_id', farmerId);
+
+    const { error } = await query;
+
     if (error) throw error;
   }
 };
