@@ -4,9 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\" \"npm run dev:escrow\"",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:escrow\"",
     "dev:client": "vite",
-    "dev:server": "cd Server && node index.js",
     "dev:escrow": "cd backend && node server.js",
     "build": "vite build",
     "lint": "eslint .",
