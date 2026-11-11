@@ -91,7 +91,7 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 ## Deployment
 - **Frontend — Vercel:** deploys from this repo. Set `VITE_ESCROW_API_URL` to the Render backend URL (see below), plus `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_RAZORPAY_KEY_ID`, `VITE_GOOGLE_MAPS_API_KEY`.
 - **Escrow backend — Render:** live at https://farmer-escrow-backend.onrender.com. `render.yaml` (Blueprint) defines the web service — `rootDir: backend`, build `npm install`, start `node server.js`, health check `/health`. Node is a bounded range (`NODE_VERSION: ">=22 <25"`), not an exact pin. Set these in the Render dashboard (never in the repo): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`.
-- **Database — Supabase (new project):** create a fresh project, apply all seven migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
+- **Database — Supabase (new project):** create a fresh project, apply all six migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
 
 ## Screenshots
 ![Homepage — hero and marketplace](docs/screenshots/homepage.png)
