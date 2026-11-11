@@ -82,7 +82,7 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 ## Setup
 1. `git clone` the repo and run `npm install` (root and `backend/` each have their own `package.json` where applicable)
 2. Copy each `.env.example` to `.env` and add your own keys — root `.env.example` (frontend), `backend/.env.example`. Never commit a real `.env`.
-3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql`, `20261108_create_refunds.sql`, `20261109_security_hardening.sql`, then `20261111_transaction_hardening.sql` (atomic stock reservation + retry scheduling).
+3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql`, `20261108_create_refunds.sql`, `20261109_security_hardening.sql`, then `20261111_transaction_hardening.sql` (atomic stock reservation + retry scheduling), then `20261112_profile_privacy.sql` (private profiles + farmer directory + signup trigger).
 4. Run the frontend with `npm run dev`; run the escrow backend with `npm run dev` in `backend/` (port 5001).
 
 ## Deployment
