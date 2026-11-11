@@ -15,7 +15,7 @@
 │   ├── hooks/            # Shared React hooks
 │   ├── utils/            # Small shared helpers
 │   └── assets/           # Static images (currently empty)
-├── backend/              # Escrow API (Express) — the money logic, runs on Render
+├── backend/              # Payment API (Express), runs on Render
 │   ├── server.js         # Entry point: mounts routes, starts the hourly auto-refund cron
 │   ├── routes/           # URL map: orderRoutes.js → /api/escrow/*
 │   ├── controllers/      # escrowController.js — request in, response out
@@ -57,7 +57,7 @@ Backend and database:
 - Payment REST endpoints — `backend/routes/orderRoutes.js` + `backend/controllers/escrowController.js`: `POST /create-order`, `/verify-payment`, `/update-status`, `/ship-order`, `/confirm-delivery`, `/refund`
 - Payment service logic — `backend/services/escrowService.js`: server-side amount checks, payment verification, order transitions and idempotent refunds
 - Auto-refund cron — `backend/server.js` + `backend/services/escrowService.js`: `node-cron` schedule (`0 * * * *`, hourly) that auto-refunds expired/unconfirmed orders
-- Database + security — `supabase/migrations/`: base schema (`20261108_base_schema.sql`), refunds ledger (`20261108_create_refunds.sql`), hardening (`20261109_security_hardening.sql`, `20261111_transaction_hardening.sql`, `20261112_profile_privacy.sql`)
+- Database + security — `supabase/migrations/`: base schema (`20261108_base_schema.sql`), refunds ledger (`20261108_create_refunds.sql`), hardening (`20261109_security_hardening.sql`, `20261111_transaction_hardening.sql`, `20261112_profile_privacy.sql`, `20261113_payment_binding.sql`)
 
 ## API Endpoints
 
