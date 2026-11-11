@@ -53,22 +53,7 @@ const SignUp = () => {
     setLoading(true);
 
     try {
-      // Step 1: Check if user already exists (Global Email Check)
-      const { data: existingUser } = await supabase
-        .from('profiles')
-        .select('id, role')
-        .eq('email_address', email)
-        .limit(1)
-        .maybeSingle();
-
-      if (existingUser) {
-        // Generic message: never reveal whether the email is registered
-        // or which role it has.
-        setError('Could not create an account with these details. If you already have an account, please log in.');
-        setLoading(false);
-        return;
-      }
-
+      // Supabase Auth enforces email uniqueness; no public profile lookup is needed.
       // Step 2: Sign up with Supabase Auth
       // Profile fields go as user_metadata: the database trigger
       // (handle_new_user on auth.users) creates the profiles row from
