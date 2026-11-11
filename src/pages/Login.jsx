@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
-import { validateEmail, validatePhone } from '../utils/helper';
+import { validateEmail } from '../utils/helper';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -23,34 +23,15 @@ const Login = () => {
     }
 
     setLoading(true);
-    let loginEmail = identifier;
-
     try {
-      // If identifier is a phone number, look up the email
-      if (validatePhone(identifier)) {
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('email_address')
-          .eq('phone_number', identifier)
-          .eq('role', role) // Check for matching role even during phone lookup
-          .single();
-
-        if (profileError || !profile) {
-          // Generic message: never reveal whether an account exists for
-          // this phone number (same text as a wrong password).
-          setError('Invalid credentials. Please check your phone number and password.');
-          setLoading(false);
-          return;
-        }
-        loginEmail = profile.email_address;
-      } else if (!validateEmail(identifier)) {
-        setError('Please enter a valid email or 10-digit phone number.');
+      if (!validateEmail(identifier)) {
+        setError('Please enter a valid email address.');
         setLoading(false);
         return;
       }
 
       const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: loginEmail,
+        email: identifier,
         password,
       });
 
@@ -58,7 +39,7 @@ const Login = () => {
         // Keep wrong-password failures indistinguishable from an unknown
         // identifier: same generic message either way.
         if (signInError.message.includes('Invalid login credentials')) {
-          setError('Invalid credentials. Please check your phone number and password.');
+          setError('Invalid email or password.');
         } else {
           setError(signInError.message);
         }
@@ -131,13 +112,14 @@ const Login = () => {
 
         <form className="space-y-5" onSubmit={handleLogin}>
           <div className="space-y-1.5 text-left">
-            <label className="text-sm font-medium text-green-deep block">Email or Phone Number</label>
+            <label htmlFor="identifier" className="text-sm font-medium text-green-deep block">Email Address</label>
             <input 
+              id="identifier"
               type="text" 
               required
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
-              placeholder="name@example.com or 10-digit number" 
+              placeholder="name@example.com" 
               className="w-full bg-cream-dark rounded-xl px-4 py-3 text-sm text-[#4a4a4a] border border-transparent focus:border-green-fresh focus:bg-white focus:outline-none transition-all duration-300 placeholder-gray-400"
             />
           </div>

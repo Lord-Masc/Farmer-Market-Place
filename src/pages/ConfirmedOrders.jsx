@@ -37,7 +37,7 @@ const ConfirmedOrders = () => {
             });
             if(data.success) {
                 setConfirmModal({ show: false, orderId: null });
-                setStatusToast({ show: true, type: 'success', text: 'Payment Released to Farmer! 🌾✅' });
+                setStatusToast({ show: true, type: 'success', text: 'Order completed successfully. Payment status updated.' });
                 fetchConfirmedOrders();
                 setTimeout(() => setStatusToast({ show: false, type: 'success', text: '' }), 4000);
             }

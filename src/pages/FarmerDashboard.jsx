@@ -259,16 +259,10 @@ const FarmerDashboard = () => {
         const productsMap = {};
         if (products) products.forEach(p => productsMap[p.id] = p);
 
-        // Fetch buyers manually
-        const buyerIds = [...new Set(rawOrders.map(o => o.buyer_id).filter(Boolean))];
-        const { data: buyers } = await supabase.from('profiles').select('id, first_name, last_name, phone_number, phone').in('id', buyerIds);
-        const buyersMap = {};
-        if (buyers) buyers.forEach(b => buyersMap[b.id] = b);
-
         const mergedOrders = rawOrders.map(o => ({
             ...o,
             product: productsMap[o.product_id] || {},
-            buyer: buyersMap[o.buyer_id] || {}
+            buyer: { first_name: o.buyer_name || 'Buyer' }
         }));
 
         setOrders(mergedOrders || []);
@@ -525,7 +519,7 @@ const FarmerDashboard = () => {
   };
 
   const renderStats = () => {
-    const totalEarnings = orders.filter(o => o.status === 'delivered').reduce((acc, curr) => acc + curr.total_price, 0);
+    const totalEarnings = orders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').reduce((acc, curr) => acc + curr.total_price, 0);
     const stats = [
         { label: 'Total Earnings', value: `₹${totalEarnings || '0'}`, icon: '💰', trend: 'Lifetime income' },
         { label: 'Active Listings', value: products.length.toString(), icon: '🌾', trend: 'Live products' },
@@ -662,10 +656,10 @@ const FarmerDashboard = () => {
                                     </td>
                                     <td className="p-6">
                                         <div className="flex flex-col gap-1">
-                                            <p className="text-sm font-bold text-green-deep uppercase tracking-tighter">👤 {order.buyer?.first_name} {order.buyer?.last_name || ''}</p>
+                                            <p className="text-sm font-bold text-green-deep uppercase tracking-tighter">👤 {order.buyer_name || 'Buyer'}</p>
                                             <div className="flex flex-col">
                                                 <p className="text-[10px] text-gray-400 font-bold uppercase">🏠 TO: {order.delivery_address || 'Profile Location'}</p>
-                                                <p className="text-[10px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.buyer_phone || order.buyer?.phone_number || order.buyer?.phone || 'No Phone'}</p>
+                                                <p className="text-[10px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.buyer_phone || 'No Phone'}</p>
                                             </div>
                                         </div>
                                     </td>
@@ -684,8 +678,8 @@ const FarmerDashboard = () => {
                                                 'bg-green-fresh/20 text-green-fresh'
                                             }`}>
                                                 {(order.status === 'pending' || order.status === 'CREATED') ? 'New Request' : 
-                                                 order.status === 'PAID' ? 'Payment Held (Escrow)' :
-                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Completed & Released' : 
+                                                 order.status === 'PAID' ? 'Payment Verified' :
+                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Order Completed' : 
                                                  order.status === 'declined' ? 'Request Rejected' :
                                                  order.status}
                                             </span>
@@ -716,7 +710,7 @@ const FarmerDashboard = () => {
                                             )}
                                             {order.status === 'PAID' && (
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1 opacity-90 animate-pulse">
-                                                    <span>📦</span> Payment Held. Dispatch Now!
+                                                    <span>📦</span> Payment Verified. Dispatch Now!
                                                 </span>
                                             )}
                                             {(order.status === 'delivered' || order.status === 'COMPLETED') && (
@@ -972,7 +966,7 @@ const FarmerDashboard = () => {
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-cream-dark">
                 <h2 className="font-playfair text-2xl font-black text-green-deep">Income Tracker 💸</h2>
-                <p className="text-gray-400 text-sm font-bold">Track your payments being held in the secure Agro-Vault.</p>
+                <p className="text-gray-400 text-sm font-bold">Track verified payments and completed orders.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-6">
@@ -988,7 +982,7 @@ const FarmerDashboard = () => {
                                     <div className="w-16 h-16 bg-cream rounded-2xl flex items-center justify-center text-3xl shadow-inner">📦</div>
                                     <div>
                                         <h4 className="text-lg font-black text-green-deep">{order.product?.name}</h4>
-                                        <p className="text-[10px] text-gray-400 font-black uppercase">Buyer: {order.buyer?.first_name} · <span className="text-green-fresh">₹{order.total_price}</span></p>
+                                        <p className="text-[10px] text-gray-400 font-black uppercase">Buyer: {order.buyer_name || 'Buyer'} · <span className="text-green-fresh">₹{order.total_price}</span></p>
                                     </div>
                                 </div>
 
@@ -1011,7 +1005,7 @@ const FarmerDashboard = () => {
                                                 {(order.status === 'COMPLETED' || order.status === 'delivered') ? '✅' : '🛡️'}
                                             </div>
                                             <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber animate-pulse'}`}>
-                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Escrow Released' : 'Held in Vault'}
+                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Order Completed' : 'Payment Verified'}
                                             </p>
                                         </div>
 
@@ -1025,10 +1019,10 @@ const FarmerDashboard = () => {
                                 <div className="bg-cream/30 p-6 rounded-[24px] text-center lg:text-right min-w-[220px]">
                                     <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-tighter">Current Money Status</p>
                                     <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber'}`}>
-                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? '💸 PAID TO YOU' : '🔒 SECURELY HELD'}
+                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
                                     </p>
                                     {order.status !== 'COMPLETED' && order.status !== 'delivered' && (
-                                        <p className="text-[9px] text-gray-400 italic mt-2">Will be released once buyer confirms delivery.</p>
+                                        <p className="text-[9px] text-gray-400 italic mt-2">Automatic farmer payouts are not configured yet.</p>
                                     )}
                                 </div>
                             </div>
@@ -1299,7 +1293,7 @@ const FarmerDashboard = () => {
                   <div>
                       <h4 className="text-md font-black text-green-deep mb-1">Buyer has Paid! ✨</h4>
                       <p className="text-xs text-gray-500 font-bold leading-relaxed">
-                          A payment of <span className="text-green-fresh">₹{escrowNotification.amount}</span> for Order #{escrowNotification.orderId.slice(0,6)} is now **Held in Escrow**.
+                          A payment of <span className="text-green-fresh">₹{escrowNotification.amount}</span> for Order #{escrowNotification.orderId.slice(0,6)} has been verified by Razorpay.
                       </p>
                       <button 
                          onClick={() => { setActiveTab('Payment Track'); setEscrowNotification({ show: false, orderId: null, amount: 0 }); }}

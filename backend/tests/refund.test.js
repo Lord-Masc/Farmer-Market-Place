@@ -48,6 +48,15 @@ function makeSupabaseMock(db, options = {}) {
         const list = String(f.val).replace(/[()"]/g, '').split(',').map((s) => s.trim());
         if (list.includes(row[f.col])) return false;
       }
+      if (f.type === 'or') {
+        // PostgREST or-filter: the row passes if ANY clause matches.
+        const hit = f.clauses.some((c) => {
+          if (c.op === 'is') return c.val === null ? row[c.col] == null : row[c.col] === c.val;
+          if (c.op === 'lte') return row[c.col] != null && row[c.col] <= c.val;
+          return false;
+        });
+        if (!hit) return false;
+      }
     }
     return true;
   }
@@ -58,6 +67,15 @@ function makeSupabaseMock(db, options = {}) {
     if (!table) return { data: null, error: { message: `table ${q.table} does not exist` } };
     if (q.op === 'select') {
       let rows = table.filter((r) => matches(r, q.filters));
+      if (q.orderBy) {
+        const { col, ascending } = q.orderBy;
+        rows = [...rows].sort((a, b) => {
+          const av = a[col] ?? '';
+          const bv = b[col] ?? '';
+          if (av === bv) return 0;
+          return ascending ? (av < bv ? -1 : 1) : (av > bv ? -1 : 1);
+        });
+      }
       if (q.limit != null) rows = rows.slice(0, q.limit);
       return { data: rows, error: null };
     }
@@ -96,6 +114,18 @@ function makeSupabaseMock(db, options = {}) {
       is(col, val) { q.filters.push({ type: 'is', col, val }); return api; },
       not(col, op, val) { q.filters.push({ type: 'not', col, op, val }); return api; },
       limit(n) { q.limit = n; return api; },
+      // PostgREST or-filter: 'col.op.val,col.op.val' (value is everything
+      // after the second dot, so ISO timestamps with '.' survive).
+      or(str) {
+        const clauses = String(str).split(',').map((part) => {
+          const [col, op, ...rest] = part.split('.');
+          const joined = rest.join('.');
+          return { col, op, val: op === 'is' && joined === 'null' ? null : joined };
+        });
+        q.filters.push({ type: 'or', clauses });
+        return api;
+      },
+      order(col, { ascending = true } = {}) { q.orderBy = { col, ascending }; return api; },
       single() { return api; },
       then(resolve, reject) {
         return new Promise((res) => setTimeout(res, 1))
@@ -118,7 +148,7 @@ function makeSupabaseMock(db, options = {}) {
         const claimed = [];
         for (const row of db.orders) {
           if (claimed.length >= limit) break;
-          if (row.status === 'REFUND_PENDING') {
+          if (row.status === 'REFUND_PENDING' && (!row.next_retry_at || Date.parse(row.next_retry_at) <= Date.now())) {
             row.status = 'REFUND_PROCESSING';
             claimed.push({ ...row });
           }
@@ -175,14 +205,14 @@ describe('refund idempotency', () => {
     service = require('../services/escrowService');
   });
 
-  function seedOrder({ status = 'REFUND_PENDING', amount = 499, paymentId = 'pay_test_123' } = {}) {
+  function seedOrder({ id = 'order_1', status = 'REFUND_PENDING', amount = 499, paymentId = 'pay_test_123' } = {}) {
     const order = {
-      id: 'order_1', status, total_price: amount,
+      id, status, total_price: amount,
       buyer_id: 'buyer_1', farmer_id: 'farmer_1',
       delivery_deadline: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     };
     db.orders.push(order);
-    db.payments.push({ id: 'pay_1', order_id: order.id, amount, status: 'HELD', razorpay_payment_id: paymentId });
+    db.payments.push({ id: `pay_${id}`, order_id: order.id, amount, status: 'HELD', razorpay_payment_id: paymentId });
     return order;
   }
 
@@ -316,5 +346,35 @@ describe('refund idempotency', () => {
     expect(db.refunds.length).toBe(1);
     expect(db.refunds[0].gateway_refund_id).toBe('rfnd_existing_1');
     expect(db.orders[0].status).toBe('REFUNDED');
+  });
+
+  test('(10) future retry is not claimed before next_retry_at', async () => {
+    const order = seedOrder();
+    order.next_retry_at = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await service.autoRefundJob();
+    expect(order.status).toBe('REFUND_PENDING');
+    expect(db.refunds.length).toBe(0);
+    expect(rzp.payments.refund.mock.calls.length).toBe(0);
+  });
+
+  test('(11) fallback claim — due rows are not starved by future-retry rows', async () => {
+    // RPC unavailable: the fallback select must filter + order in the
+    // query. With the old select-first-50 + JS-filter code, the 50
+    // future-retry rows fill the page and the 2 due rows are never seen.
+    mockOptions.rpcAvailable = false;
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    for (let i = 0; i < 50; i++) {
+      const o = seedOrder({ id: `order_future_${i}`, status: 'REFUND_PENDING' });
+      o.next_retry_at = future;
+    }
+    seedOrder({ id: 'order_due_1', status: 'REFUND_PENDING' });
+    seedOrder({ id: 'order_due_2', status: 'REFUND_PENDING' });
+    await service.autoRefundJob();
+    expect(db.orders.find((o) => o.id === 'order_due_1').status).toBe('REFUNDED');
+    expect(db.orders.find((o) => o.id === 'order_due_2').status).toBe('REFUNDED');
+    expect(db.refunds.length).toBe(2);
+    expect(rzp.payments.refund.mock.calls.length).toBe(2);
+    expect(db.orders.filter((o) => o.id.startsWith('order_future_'))
+      .every((o) => o.status === 'REFUND_PENDING')).toBe(true);
   });
 });

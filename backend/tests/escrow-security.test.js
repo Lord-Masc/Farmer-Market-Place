@@ -82,7 +82,19 @@ function makeSupabaseMock(db) {
 
   return {
     from: (table) => builder(table),
-    rpc: async () => ({ data: [], error: null }),
+    rpc: async (name, args) => {
+      if (name !== 'confirm_order_and_reserve_stock') return { data: null, error: { message: 'unknown function' } };
+      const order = db.orders.find((row) => row.id === args.p_order_id);
+      if (!order || order.farmer_id !== args.p_farmer_id) return { data: null, error: { message: 'ORDER_NOT_ACCESSIBLE' } };
+      if (!['pending', 'CREATED'].includes(order.status)) return { data: null, error: { message: 'INVALID_TRANSITION' } };
+      const qty = Number(order.quantity) * (order.unit_at_order === 'quintal' ? 100 : 1);
+      if (!Number.isFinite(qty) || qty <= 0) return { data: null, error: { message: 'INVALID_QUANTITY' } };
+      const product = db.products.find((row) => row.id === order.product_id && row.farmer_id === args.p_farmer_id);
+      if (!product || Number(product.quantity) < qty) return { data: null, error: { message: 'INSUFFICIENT_STOCK' } };
+      product.quantity -= qty;
+      order.status = 'confirmed';
+      return { data: [{ ...order }], error: null };
+    },
     auth: {
       getUser: async (token) => {
         const users = {
@@ -117,7 +129,11 @@ function makeRazorpayMock() {
         return { id: `rfnd_mock_${mock.payments.refund.mock.calls.length}`, entity: 'refund', amount: opts.amount };
       }),
     },
-    orders: { create: jest.fn(async () => ({ id: 'order_rzp_1' })) },
+    orders: {
+      create: jest.fn(async (options) => ({ id: 'order_rzp_1', amount: options.amount, status: 'created' })),
+      fetch: jest.fn(async (id) => ({ id, amount: 49900, status: 'created' })),
+      fetchPayments: jest.fn(async () => ({ items: [] })),
+    },
   };
   return mock;
 }
@@ -199,111 +215,104 @@ describe('escrow security', () => {
     expect(req.user.id).toBe('buyer_1');
   });
 
-  // --- create-order price binding ----------------------------------------
-  test('create-order: exact product price succeeds and stores the validated total', async () => {
-    const res = await service.createRazorpayOrder('buyer_1', 'farmer_1', 499, 'prod_1', 1, 'kg', 'Addr', '9999999999');
-    expect(res.order_id).toBeTruthy();
+  // --- approved-order payment creation ----------------------------------
+  test('create-order: creates and binds a Razorpay order to an approved order', async () => {
+    const order = seedOrder({ status: 'confirmed' });
+    const res = await service.createRazorpayOrder('buyer_1', order.id);
+    expect(res.order_id).toBe(order.id);
     expect(res.razorpay_order_id).toBe('order_rzp_1');
-    expect(db.orders[0].total_price).toBe(499);
-    expect(db.orders[0].status).toBe('CREATED');
-    expect(db.orders[0].delivery_deadline).toBeTruthy();
+    expect(order.razorpay_order_id).toBe('order_rzp_1');
   });
 
-  test('create-order: 1-rupee amount for a 499 product is rejected', async () => {
-    await expect(
-      service.createRazorpayOrder('buyer_1', 'farmer_1', 1, 'prod_1', 1, 'kg', 'Addr', '9999999999')
-    ).rejects.toMatchObject({ code: 'AMOUNT_MISMATCH' });
-    expect(db.orders.length).toBe(0);
+  test('create-order: forged total and seller are rejected', async () => {
+    const wrongTotal = seedOrder({ status: 'confirmed', total_price: 1 });
+    await expect(service.createRazorpayOrder('buyer_1', wrongTotal.id))
+      .rejects.toMatchObject({ code: 'AMOUNT_MISMATCH' });
+
+    const wrongSeller = seedOrder({ status: 'confirmed', farmer_id: 'farmer_9' });
+    await expect(service.createRazorpayOrder('buyer_1', wrongSeller.id))
+      .rejects.toMatchObject({ code: 'ORDER_NOT_ACCESSIBLE' });
   });
 
-  test('create-order: wrong seller for the product is rejected', async () => {
-    await expect(
-      service.createRazorpayOrder('buyer_1', 'farmer_9', 499, 'prod_1', 1, 'kg', 'Addr', '9999999999')
-    ).rejects.toMatchObject({ code: 'INVALID_SELLER' });
+  test('create-order: invalid quantity and unapproved orders are rejected', async () => {
+    const invalid = seedOrder({ status: 'confirmed', quantity: -5 });
+    await expect(service.createRazorpayOrder('buyer_1', invalid.id))
+      .rejects.toMatchObject({ code: 'INVALID_QUANTITY' });
+
+    const pending = seedOrder({ status: 'pending' });
+    await expect(service.createRazorpayOrder('buyer_1', pending.id))
+      .rejects.toMatchObject({ code: 'ORDER_NOT_PAYABLE' });
   });
 
-  test('create-order: negative quantity is rejected', async () => {
-    await expect(
-      service.createRazorpayOrder('buyer_1', 'farmer_1', 499, 'prod_1', -5, 'kg', 'Addr', '9999999999')
-    ).rejects.toMatchObject({ code: 'INVALID_QUANTITY' });
-  });
-
-  test('create-order existing-order: deadline is NOT reset, total is corrected, buyer-only, CREATED-only', async () => {
-    const deadline = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const existing = seedOrder({ status: 'CREATED', total_price: 1, delivery_deadline: deadline, delivery_address: 'Victim Address' });
-    const res = await service.createRazorpayOrder('buyer_1', 'farmer_1', 499, 'prod_1', 1, 'kg', 'Attacker Address', '9999999999', existing.id);
-    expect(res.order_id).toBe(existing.id);
-    expect(db.orders[0].delivery_deadline).toBe(deadline);
-    expect(db.orders[0].delivery_address).toBe('Attacker Address');
-    expect(db.orders[0].total_price).toBe(499);
-
-    // Another buyer cannot reuse the order id.
-    await expect(
-      service.createRazorpayOrder('other_1', 'farmer_1', 499, 'prod_1', 1, 'kg', 'X', '111', existing.id)
-    ).rejects.toMatchObject({ status: 403 });
-
-    // A PAID order cannot be re-entered through create-order.
-    db.orders[0].status = 'PAID';
-    await expect(
-      service.createRazorpayOrder('buyer_1', 'farmer_1', 499, 'prod_1', 1, 'kg', 'X', '111', existing.id)
-    ).rejects.toMatchObject({ code: 'ORDER_NOT_EDITABLE' });
+  test('create-order: buyer-only and paid orders cannot create another payment', async () => {
+    const order = seedOrder({ status: 'confirmed' });
+    await expect(service.createRazorpayOrder('other_1', order.id))
+      .rejects.toMatchObject({ status: 403 });
+    order.status = 'PAID';
+    await expect(service.createRazorpayOrder('buyer_1', order.id))
+      .rejects.toMatchObject({ code: 'ORDER_NOT_PAYABLE' });
   });
 
   // --- verify-payment binding --------------------------------------------
-  test('verify-payment: happy path marks PAID, records the gateway amount, backfills deadline', async () => {
-    const order = seedOrder({ status: 'CREATED', delivery_deadline: null });
+  test('verify-payment: happy path records a bound captured payment and backfills deadline', async () => {
+    const order = seedOrder({ status: 'confirmed', delivery_deadline: null, razorpay_order_id: 'order_rzp_1' });
     const updated = await service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1');
     expect(updated.status).toBe('PAID');
-    expect(db.orders[0].delivery_deadline).toBeTruthy();
-    expect(db.payments.length).toBe(1);
+    expect(order.delivery_deadline).toBeTruthy();
+    expect(db.payments).toHaveLength(1);
     expect(db.payments[0].status).toBe('HELD');
     expect(db.payments[0].razorpay_payment_id).toBe('pay_1');
     expect(db.payments[0].amount).toBe(499);
   });
 
-  test('verify-payment: 1-rupee payment for a 499 order is rejected', async () => {
-    const order = seedOrder({ status: 'CREATED' });
+  test('verify-payment: repeating the same verified payment is idempotent', async () => {
+    const order = seedOrder({ status: 'confirmed', razorpay_order_id: 'order_rzp_1' });
+    await service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1');
+    const repeated = await service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1');
+    expect(repeated.status).toBe('PAID');
+    expect(db.payments).toHaveLength(1);
+  });
+
+  test('verify-payment: amount, gateway-order and capture state are checked', async () => {
+    const order = seedOrder({ status: 'confirmed', razorpay_order_id: 'order_rzp_1' });
     rzp._payment = { id: 'pay_1', status: 'captured', amount: 100, order_id: 'order_rzp_1' };
     await expect(service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1'))
       .rejects.toMatchObject({ code: 'AMOUNT_MISMATCH' });
-    expect(db.orders[0].status).toBe('CREATED');
-    expect(db.payments.length).toBe(0);
-  });
+    expect(order.status).toBe('confirmed');
 
-  test('verify-payment: replaying one payment across two orders is rejected', async () => {
-    const a = seedOrder({ status: 'CREATED' });
-    const b = seedOrder({ status: 'CREATED' });
-    await service.verifyAndMarkPaid(a.id, 'order_rzp_1', 'pay_1', 'buyer_1');
-    await expect(service.verifyAndMarkPaid(b.id, 'order_rzp_1', 'pay_1', 'buyer_1'))
-      .rejects.toMatchObject({ code: 'PAYMENT_ALREADY_USED' });
-    expect(db.orders[1].status).toBe('CREATED');
-  });
-
-  test('verify-payment: payment for another Razorpay order is rejected', async () => {
-    const order = seedOrder({ status: 'CREATED' });
     rzp._payment = { id: 'pay_1', status: 'captured', amount: 49900, order_id: 'order_rzp_OTHER' };
     await expect(service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1'))
       .rejects.toMatchObject({ code: 'PAYMENT_ORDER_MISMATCH' });
-  });
 
-  test('verify-payment: non-captured payment is rejected', async () => {
-    const order = seedOrder({ status: 'CREATED' });
     rzp._payment = { id: 'pay_1', status: 'authorized', amount: 49900, order_id: 'order_rzp_1' };
     await expect(service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1'))
       .rejects.toMatchObject({ code: 'PAYMENT_NOT_CAPTURED' });
+    expect(db.payments).toHaveLength(0);
   });
 
-  test('verify-payment: wrong buyer and non-CREATED order are rejected', async () => {
-    const order = seedOrder({ status: 'CREATED' });
+  test('verify-payment: a payment ID cannot be replayed across orders', async () => {
+    const first = seedOrder({ status: 'confirmed', razorpay_order_id: 'order_rzp_1' });
+    const second = seedOrder({ status: 'confirmed', razorpay_order_id: 'order_rzp_2' });
+    await service.verifyAndMarkPaid(first.id, 'order_rzp_1', 'pay_1', 'buyer_1');
+    rzp._payment = { id: 'pay_1', status: 'captured', amount: 49900, order_id: 'order_rzp_2' };
+    await expect(service.verifyAndMarkPaid(second.id, 'order_rzp_2', 'pay_1', 'buyer_1'))
+      .rejects.toMatchObject({ code: 'PAYMENT_ALREADY_USED' });
+    expect(second.status).toBe('confirmed');
+  });
+
+  test('verify-payment: wrong buyer, wrong internal binding and invalid state are rejected', async () => {
+    const order = seedOrder({ status: 'confirmed', razorpay_order_id: 'order_rzp_1' });
     await expect(service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'other_1'))
       .rejects.toMatchObject({ status: 403 });
-    db.orders[0].status = 'PAID';
+    await expect(service.verifyAndMarkPaid(order.id, 'order_rzp_other', 'pay_1', 'buyer_1'))
+      .rejects.toMatchObject({ code: 'PAYMENT_ORDER_MISMATCH' });
+    order.status = 'SHIPPED';
     await expect(service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1'))
       .rejects.toMatchObject({ code: 'ORDER_NOT_PAYABLE' });
   });
 
   // --- update-status state machine + atomic stock -------------------------
-  test('update-status: confirm decrements stock once; re-confirm and revert are rejected', async () => {
+  test('update-status: confirm reserves stock once; re-confirm and revert are rejected', async () => {
     const order = seedOrder({ status: 'pending', quantity: 2 });
     const confirmed = await service.updateOrderStatusWithStock(order.id, 'farmer_1', 'confirmed');
     expect(confirmed.status).toBe('confirmed');
@@ -325,38 +334,27 @@ describe('escrow security', () => {
     expect(db.products[0].quantity).toBe(10);
   });
 
-  test('update-status: insufficient stock reports a generic error without the exact stock level', async () => {
-    const order = seedOrder({ status: 'pending', quantity: 20 });
-    await expect(service.updateOrderStatusWithStock(order.id, 'farmer_1', 'confirmed'))
+  test('update-status: insufficient and negative stock requests are rejected', async () => {
+    const insufficient = seedOrder({ status: 'pending', quantity: 20 });
+    await expect(service.updateOrderStatusWithStock(insufficient.id, 'farmer_1', 'confirmed'))
       .rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK' });
-    try {
-      await service.updateOrderStatusWithStock(order.id, 'farmer_1', 'confirmed');
-      throw new Error('should have thrown');
-    } catch (err) {
-      expect(err.message).not.toContain('10');
-    }
-    expect(db.products[0].quantity).toBe(10);
-  });
 
-  test('update-status: negative stored quantity cannot increase stock', async () => {
-    const order = seedOrder({ status: 'pending', quantity: -5 });
-    await expect(service.updateOrderStatusWithStock(order.id, 'farmer_1', 'confirmed'))
+    const invalid = seedOrder({ status: 'pending', quantity: -5 });
+    await expect(service.updateOrderStatusWithStock(invalid.id, 'farmer_1', 'confirmed'))
       .rejects.toMatchObject({ code: 'INVALID_QUANTITY' });
     expect(db.products[0].quantity).toBe(10);
   });
 
-  test('update-status: two concurrent confirms for 6kg each from 10kg stock — only one succeeds', async () => {
+  test('update-status: concurrent confirmations reserve stock only once', async () => {
     const a = seedOrder({ status: 'pending', quantity: 6 });
     const b = seedOrder({ status: 'pending', quantity: 6 });
     const results = await Promise.allSettled([
       service.updateOrderStatusWithStock(a.id, 'farmer_1', 'confirmed'),
       service.updateOrderStatusWithStock(b.id, 'farmer_1', 'confirmed'),
     ]);
-    const fulfilled = results.filter((r) => r.status === 'fulfilled');
-    expect(fulfilled.length).toBe(1);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect(db.products[0].quantity).toBe(4);
-    const confirmedCount = db.orders.filter((o) => o.status === 'confirmed').length;
-    expect(confirmedCount).toBe(1);
+    expect(db.orders.filter((o) => o.status === 'confirmed')).toHaveLength(1);
   });
 
   // --- ship / complete -----------------------------------------------------

@@ -10,14 +10,9 @@ const { AppError } = require('../utils/errors');
 
 exports.createOrder = async (req, res, next) => {
     try {
-        const { buyer_id, seller_id, amount, product_id, quantity, unit, delivery_address, buyer_phone, order_id } = req.body;
-        if (!buyer_id || !seller_id || !amount) {
-            throw new AppError(400, 'MISSING_FIELDS', 'Missing required fields: buyer_id, seller_id, amount');
-        }
-        if (buyer_id !== req.user.id) {
-            throw new AppError(403, 'FORBIDDEN', 'You can only create orders for yourself.');
-        }
-        const orderData = await escrowService.createRazorpayOrder(buyer_id, seller_id, amount, product_id, quantity, unit, delivery_address, buyer_phone, order_id);
+        const { order_id } = req.body;
+        if (!order_id) throw new AppError(400, 'MISSING_ORDER', 'An approved order is required.');
+        const orderData = await escrowService.createRazorpayOrder(req.user.id, order_id);
         res.status(201).json(orderData);
     } catch (err) {
         next(err);
@@ -31,11 +26,14 @@ exports.verifyPayment = async (req, res, next) => {
             throw new AppError(400, 'MISSING_FIELDS', 'Missing required payment fields.');
         }
         const secret = process.env.RAZORPAY_KEY_SECRET;
+        if (!secret) throw new AppError(503, 'PAYMENT_UNAVAILABLE', 'Payment verification is temporarily unavailable.');
         const hmac = crypto.createHmac('sha256', secret);
         hmac.update(razorpay_order_id + "|" + razorpay_payment_id);
         const generated_signature = hmac.digest('hex');
+        const received = Buffer.from(String(razorpay_signature), 'hex');
+        const expected = Buffer.from(generated_signature, 'hex');
 
-        if (generated_signature !== razorpay_signature) {
+        if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
             throw new AppError(400, 'INVALID_SIGNATURE', 'Invalid signature.');
         }
         // The service verifies the payment against Razorpay (captured status,

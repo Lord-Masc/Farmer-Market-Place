@@ -261,7 +261,7 @@ const BuyerDashboard = () => {
 
         // Step 2: Fetch corresponding farmer profiles
         const farmerIds = [...new Set(productsData.map(p => p.farmer_id).filter(Boolean))];
-        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, latitude, longitude, phone_number, address, city').in('id', farmerIds);
+        const { data: profiles } = await supabase.from('public_farmer_profiles').select('id, first_name, last_name, phone_number, city').in('id', farmerIds);
         
         const profilesMap = {};
         if (profiles) profiles.forEach(p => profilesMap[p.id] = p);
@@ -341,7 +341,7 @@ const BuyerDashboard = () => {
 
         // Fetch farmers manually
         const farmerIds = [...new Set(rawOrders.map(o => o.farmer_id).filter(Boolean))];
-        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, phone_number').in('id', farmerIds);
+        const { data: profiles } = await supabase.from('public_farmer_profiles').select('id, first_name, last_name, phone_number').in('id', farmerIds);
         const profilesMap = {};
         if (profiles) profiles.forEach(p => profilesMap[p.id] = p);
 
@@ -402,6 +402,7 @@ const BuyerDashboard = () => {
             farmer_id: selectedProduct.farmer_id || selectedProduct.farmer?.id,
             farmer_name: selectedProduct.farmer?.first_name || 'Merchant',
             farmer_phone: selectedProduct.farmer?.phone_number || '',
+            buyer_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' '),
             quantity: orderQuantity,
             unit_at_order: orderUnit,
             total_price: finalTotal,
@@ -435,7 +436,7 @@ const BuyerDashboard = () => {
         });
         if(data.success) {
             setConfirmModal({ show: false, orderId: null });
-            setStatusMessage({ show: true, type: 'success', text: 'Success! Payment Released to Farmer. 🌾✅' });
+            setStatusMessage({ show: true, type: 'success', text: 'Order completed successfully. Payment status updated. 🌾✅' });
             fetchMyOrders();
             setTimeout(() => setStatusMessage({ show: false, type: 'success', text: '' }), 4000);
         } else {
@@ -767,19 +768,7 @@ const BuyerDashboard = () => {
                                             {order.status === 'confirmed' && (
                                                 <button 
                                                    onClick={() => {
-                                                        const orderParams = new URLSearchParams({
-                                                            orderId: order.id,
-                                                            productId: order.product?.id || '',
-                                                            buyerId: user.id,
-                                                            sellerId: order.farmer_id || '',
-                                                            amount: order.total_price,
-                                                            productName: order.product?.name || 'Product',
-                                                            quantity: order.quantity,
-                                                            unit: order.unit_at_order || 'kg',
-                                                            deliveryAddress: order.delivery_address || '',
-                                                            buyerPhone: order.buyer_phone || ''
-                                                        });
-                                                        window.location.href = `/escrow-test?${orderParams.toString()}`;
+                                                        window.location.href = `/checkout?orderId=${encodeURIComponent(order.id)}`;
                                                    }}
                                                    className="bg-green-fresh text-white text-[10px] font-black uppercase px-6 py-3 rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2 mx-auto lg:ml-auto"
                                                 >
@@ -813,8 +802,8 @@ const BuyerDashboard = () => {
         return (
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-cream-dark">
-              <h2 className="font-playfair text-2xl font-black text-green-deep mb-2">Escrow Payment Tracker 🛡️</h2>
-              <p className="text-gray-400 text-sm font-bold">Monitor where your money is held in real-time.</p>
+              <h2 className="font-playfair text-2xl font-black text-green-deep mb-2">Payment & Order Tracker</h2>
+              <p className="text-gray-400 text-sm font-bold">Track payment verification and delivery status.</p>
             </div>
             
             <div className="grid grid-cols-1 gap-6">
@@ -857,7 +846,7 @@ const BuyerDashboard = () => {
                               {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? '🛡️' : '✅'}
                             </div>
                             <p className={`text-[10px] font-black uppercase mt-2 ${(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'text-amber animate-pulse' : 'text-green-fresh'}`}>
-                              {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'Held in Escrow' : 'Released'}
+                              {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'Payment Verified' : 'Order Completed'}
                             </p>
                           </div>
                           
@@ -871,7 +860,7 @@ const BuyerDashboard = () => {
                       <div className="bg-cream/20 p-5 rounded-2xl border border-cream-dark/50 text-center lg:text-right min-w-[200px]">
                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-tighter mb-1">Current Fund Location</p>
                         <p className={`text-sm font-black uppercase ${(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'text-amber' : 'text-green-fresh'}`}>
-                          {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? '🔒 Locked in Agro-Vault' : '💸 Disbursed to Farmer'}
+                          {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'Payment recorded' : 'Order completed'}
                         </p>
                         {(order.status !== 'delivered' && order.status !== 'COMPLETED') && (
                           <button 
@@ -1225,7 +1214,7 @@ const BuyerDashboard = () => {
 
                                   <div className="bg-cream/30 p-5 rounded-3xl border border-dashed border-gray-200 mt-4">
                                       <p className="text-[10px] font-bold text-gray-400 italic leading-relaxed">
-                                          "By sending this request, the farmer will be notified to set aside your stock. Once approved, you can complete the secure escrow payment."
+                                          "By sending this request, the farmer will be notified to set aside your stock. Once approved, you can complete the secure payment."
                                       </p>
                                   </div>
                               </div>
@@ -1377,7 +1366,7 @@ const BuyerDashboard = () => {
                   <div className="w-20 h-20 bg-amber/10 text-amber text-4xl flex items-center justify-center rounded-3xl mx-auto mb-6">📦</div>
                   <h3 className="text-xl font-black text-green-deep uppercase tracking-tight mb-2">Confirm Receipt?</h3>
                   <p className="text-xs text-gray-500 font-bold mb-8 leading-relaxed">
-                      Is your product delivered? Once confirmed, your held payment will be <span className="text-green-fresh">released to the farmer</span> immediately.
+                      Is your product delivered? Once confirmed, your order will be marked completed. This does not trigger an automatic farmer payout.
                   </p>
                   <div className="flex gap-3">
                       <button 
@@ -1390,7 +1379,7 @@ const BuyerDashboard = () => {
                           onClick={() => handleConfirmDelivery(confirmModal.orderId)}
                           className="flex-2 bg-green-deep text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-green-deep/20 hover:scale-105 active:scale-95 transition-all"
                       >
-                          Yes, Release Now →
+                          Confirm Delivery →
                       </button>
                   </div>
               </div>
