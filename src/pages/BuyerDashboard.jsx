@@ -767,18 +767,6 @@ const BuyerDashboard = () => {
                                             {order.status === 'confirmed' && (
                                                 <button 
                                                    onClick={() => {
-                                                        const orderParams = new URLSearchParams({
-                                                            orderId: order.id,
-                                                            productId: order.product?.id || '',
-                                                            buyerId: user.id,
-                                                            sellerId: order.farmer_id || '',
-                                                            amount: order.total_price,
-                                                            productName: order.product?.name || 'Product',
-                                                            quantity: order.quantity,
-                                                            unit: order.unit_at_order || 'kg',
-                                                            deliveryAddress: order.delivery_address || '',
-                                                            buyerPhone: order.buyer_phone || ''
-                                                        });
                                                         window.location.href = `/checkout?orderId=${encodeURIComponent(order.id)}`;
                                                    }}
                                                    className="bg-green-fresh text-white text-[10px] font-black uppercase px-6 py-3 rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2 mx-auto lg:ml-auto"
