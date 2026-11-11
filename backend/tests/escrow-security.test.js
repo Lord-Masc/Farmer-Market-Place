@@ -265,6 +265,14 @@ describe('escrow security', () => {
     expect(db.payments[0].amount).toBe(499);
   });
 
+  test('verify-payment: repeating the same verified payment is idempotent', async () => {
+    const order = seedOrder({ status: 'confirmed', razorpay_order_id: 'order_rzp_1' });
+    await service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1');
+    const repeated = await service.verifyAndMarkPaid(order.id, 'order_rzp_1', 'pay_1', 'buyer_1');
+    expect(repeated.status).toBe('PAID');
+    expect(db.payments).toHaveLength(1);
+  });
+
   test('verify-payment: amount, gateway-order and capture state are checked', async () => {
     const order = seedOrder({ status: 'confirmed', razorpay_order_id: 'order_rzp_1' });
     rzp._payment = { id: 'pay_1', status: 'captured', amount: 100, order_id: 'order_rzp_1' };
