@@ -261,7 +261,7 @@ const BuyerDashboard = () => {
 
         // Step 2: Fetch corresponding farmer profiles
         const farmerIds = [...new Set(productsData.map(p => p.farmer_id).filter(Boolean))];
-        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, latitude, longitude, phone_number, address, city').in('id', farmerIds);
+        const { data: profiles } = await supabase.from('public_farmer_profiles').select('id, first_name, last_name, phone_number, city').in('id', farmerIds);
         
         const profilesMap = {};
         if (profiles) profiles.forEach(p => profilesMap[p.id] = p);
@@ -341,7 +341,7 @@ const BuyerDashboard = () => {
 
         // Fetch farmers manually
         const farmerIds = [...new Set(rawOrders.map(o => o.farmer_id).filter(Boolean))];
-        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, phone_number').in('id', farmerIds);
+        const { data: profiles } = await supabase.from('public_farmer_profiles').select('id, first_name, last_name, phone_number').in('id', farmerIds);
         const profilesMap = {};
         if (profiles) profiles.forEach(p => profilesMap[p.id] = p);
 
@@ -402,6 +402,7 @@ const BuyerDashboard = () => {
             farmer_id: selectedProduct.farmer_id || selectedProduct.farmer?.id,
             farmer_name: selectedProduct.farmer?.first_name || 'Merchant',
             farmer_phone: selectedProduct.farmer?.phone_number || '',
+            buyer_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' '),
             quantity: orderQuantity,
             unit_at_order: orderUnit,
             total_price: finalTotal,
