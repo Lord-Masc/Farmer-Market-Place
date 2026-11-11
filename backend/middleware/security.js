@@ -7,9 +7,10 @@ const cors = require('cors');
 
 // The deployed frontend + local dev origins. Extra origins come from
 // ALLOWED_ORIGINS (comma-separated) or FRONTEND_URL in the environment.
+// The old -mu Vercel deployment was removed: it is under an unknown
+// account, so it must not be a trusted credentialed origin (audit M1).
 const DEFAULT_ORIGINS = [
   'https://farmer-market-place-six.vercel.app',
-  'https://farmer-market-place-mu.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000',
 ];
