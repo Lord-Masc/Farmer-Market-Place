@@ -125,71 +125,59 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
 // their own buyer. The recorded payment amount is the gateway-verified one.
 exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment_id, buyer_id) => {
     const order = await fetchOrder(order_id);
-    if (order.buyer_id !== buyer_id) {
-        throw new AppError(403, 'FORBIDDEN', 'You can only pay for your own orders.');
-    }
-    if (order.status !== 'confirmed') {
+    if (order.buyer_id !== buyer_id) throw new AppError(403, 'FORBIDDEN', 'You can only pay for your own orders.');
+    if (!['confirmed', 'PAID'].includes(order.status)) {
         throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only a farmer-approved order can be paid.');
     }
     if (!order.razorpay_order_id || order.razorpay_order_id !== razorpay_order_id) {
         throw new AppError(400, 'PAYMENT_ORDER_MISMATCH', 'This payment does not belong to the selected order.');
     }
 
-    // The gateway is the source of truth, not the caller-supplied ids.
     let payment;
     try {
         payment = await razorpay.payments.fetch(razorpay_payment_id);
-    } catch (err) {
+    } catch (_) {
         throw new AppError(400, 'PAYMENT_NOT_FOUND', 'The payment could not be verified with the gateway.');
     }
-    if (!payment || payment.status !== 'captured') {
-        throw new AppError(400, 'PAYMENT_NOT_CAPTURED', 'The payment is not captured.');
-    }
-    if (payment.order_id !== razorpay_order_id) {
-        throw new AppError(400, 'PAYMENT_ORDER_MISMATCH', 'The payment does not belong to this checkout.');
-    }
-    const paidPaise = Number(payment.amount);
-    const expectedPaise = Math.round(Number(order.total_price) * 100);
-    if (!Number.isFinite(paidPaise) || paidPaise !== expectedPaise) {
-        throw new AppError(400, 'AMOUNT_MISMATCH', 'The paid amount does not match the order total.');
+    if (!payment || payment.status !== 'captured' || payment.order_id !== razorpay_order_id ||
+        Number(payment.amount) !== Math.round(Number(order.total_price) * 100)) {
+        throw new AppError(400, 'PAYMENT_NOT_VALID', 'The captured payment does not match this order.');
     }
 
-    // Replay guard: this payment id must not already be recorded.
-    const { data: existing, error: exErr } = await supabase
-        .from('payments').select('order_id').eq('razorpay_payment_id', razorpay_payment_id);
-    if (exErr) throw exErr;
-    if (existing && existing.length > 0) {
+    const { data: existing, error: readError } = await supabase.from('payments')
+        .select('*').eq('razorpay_payment_id', razorpay_payment_id);
+    if (readError) throw readError;
+    const used = getSingle(existing);
+    if (used && used.order_id !== order_id) {
         throw new AppError(409, 'PAYMENT_ALREADY_USED', 'This payment has already been used for another order.');
     }
+    if (!used) {
+        const { error: insertError } = await supabase.from('payments').insert({
+            order_id, amount: Number(payment.amount) / 100, status: 'HELD', razorpay_payment_id,
+        });
+        if (insertError) {
+            const { data: sameOrder, error: retryError } = await supabase.from('payments')
+                .select('*').eq('order_id', order_id);
+            if (retryError) throw retryError;
+            const saved = getSingle(sameOrder);
+            if (!saved || saved.razorpay_payment_id !== razorpay_payment_id) throw insertError;
+        }
+    }
 
-    // Mark PAID, gated on still being confirmed (a concurrent verify loses).
-    // Backfill the delivery deadline if it was never set, so the auto-refund
-    // can never miss this order.
+    if (order.status === 'PAID') return order;
     const updates = { status: 'PAID' };
     if (!order.delivery_deadline) {
         updates.delivery_deadline = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
     }
-    const { data: updatedData, error: orderError } = await supabase
-        .from('orders').update(updates).eq('id', order_id).eq('status', 'confirmed').select('*');
-    if (orderError) throw orderError;
-    const updatedOrder = getSingle(updatedData);
-    if (!updatedOrder) {
-        throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only a farmer-approved order can be paid.');
-    }
+    const { data: updated, error: updateError } = await supabase.from('orders')
+        .update(updates).eq('id', order_id).eq('status', 'confirmed').select('*');
+    if (updateError) throw updateError;
+    const paidOrder = getSingle(updated);
+    if (paidOrder) return paidOrder;
 
-    const { error: payErr } = await supabase.from('payments').insert({
-        order_id,
-        amount: paidPaise / 100,
-        status: 'HELD',
-        // Stored so a refund can call the Razorpay gateway (see refunds migration).
-        razorpay_payment_id,
-    });
-    if (payErr) {
-        await supabase.from('orders').update({ status: 'confirmed' }).eq('id', order_id).eq('status', 'PAID');
-        throw payErr;
-    }
-
-    return updatedOrder;
+    const latest = await fetchOrder(order_id);
+    if (latest.status === 'PAID') return latest;
+    throw new AppError(409, 'ORDER_NOT_PAYABLE', 'This order is no longer awaiting payment.');
 };
 
 // 2b. Farmer Update Status Logic (with Stock Management).
