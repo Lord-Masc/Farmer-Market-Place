@@ -118,7 +118,7 @@ function makeSupabaseMock(db, options = {}) {
         const claimed = [];
         for (const row of db.orders) {
           if (claimed.length >= limit) break;
-          if (row.status === 'REFUND_PENDING') {
+          if (row.status === 'REFUND_PENDING' && (!row.next_retry_at || Date.parse(row.next_retry_at) <= Date.now())) {
             row.status = 'REFUND_PROCESSING';
             claimed.push({ ...row });
           }
@@ -316,5 +316,14 @@ describe('refund idempotency', () => {
     expect(db.refunds.length).toBe(1);
     expect(db.refunds[0].gateway_refund_id).toBe('rfnd_existing_1');
     expect(db.orders[0].status).toBe('REFUNDED');
+  });
+
+  test('(10) future retry is not claimed before next_retry_at', async () => {
+    const order = seedOrder();
+    order.next_retry_at = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await service.autoRefundJob();
+    expect(order.status).toBe('REFUND_PENDING');
+    expect(db.refunds.length).toBe(0);
+    expect(rzp.payments.refund.mock.calls.length).toBe(0);
   });
 });
