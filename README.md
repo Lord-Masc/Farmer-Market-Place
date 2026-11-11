@@ -1,6 +1,6 @@
 # Farmer Marketplace
 
-2-sided agri marketplace connecting farmers and buyers with escrow-based payments.
+2-sided agri marketplace connecting farmers and buyers with Razorpay payment tracking.
 **Live:** https://farmer-market-place-six.vercel.app
 
 ## Project structure
@@ -26,7 +26,9 @@
 ├── supabase/migrations/ # THE database source of truth — apply in order on a fresh project:
 │   ├── 20261108_base_schema.sql        # tables: profiles, products, orders, payments…
 │   ├── 20261108_create_refunds.sql     # refunds ledger + claim_pending_refunds()
-│   └── 20261109_security_hardening.sql # RLS policies, retry columns, CHECKs
+│   ├── 20261109_security_hardening.sql # RLS policies, retry columns, CHECKs
+│   ├── 20261111_transaction_hardening.sql # atomic stock reservation + retry scheduling
+│   └── 20261112_profile_privacy.sql # private profiles + public farmer directory + signup trigger
 ├── render.yaml           # Render Blueprint: how the backend deploys (rootDir backend)
 ├── docs/                 # Runbooks + the refund before/after report + screenshots
 ├── scripts/              # refund-concurrency-test.js — the live before/after test
@@ -54,7 +56,7 @@ Backend and database:
 - Payment REST endpoints — `backend/routes/orderRoutes.js` + `backend/controllers/escrowController.js`: `POST /create-order`, `/verify-payment`, `/update-status`, `/ship-order`, `/confirm-delivery`, `/refund`
 - Payment service logic — `backend/services/escrowService.js`: server-side amount checks, payment verification, order transitions and idempotent refunds
 - Auto-refund cron — `backend/server.js` + `backend/services/escrowService.js`: `node-cron` schedule (`0 * * * *`, hourly) that auto-refunds expired/unconfirmed orders
-- Database + security — `supabase/migrations/`: base schema (`20261108_base_schema.sql`), refunds ledger (`20261108_create_refunds.sql`), hardening (`20261109_security_hardening.sql`)
+- Database + security — `supabase/migrations/`: base schema (`20261108_base_schema.sql`), refunds ledger (`20261108_create_refunds.sql`), hardening (`20261109_security_hardening.sql`, `20261111_transaction_hardening.sql`, `20261112_profile_privacy.sql`)
 
 ## API Endpoints
 
@@ -63,11 +65,11 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | /api/escrow/create-order | Create a Razorpay order and an order row |
-| POST | /api/escrow/verify-payment | Verify Razorpay signature, mark paid, hold escrow |
+| POST | /api/escrow/create-order | Create a Razorpay order for a farmer-approved order |
+| POST | /api/escrow/verify-payment | Verify captured payment and mark the order paid |
 | POST | /api/escrow/update-status | Farmer updates order status (with stock check) |
 | POST | /api/escrow/ship-order | Mark order shipped |
-| POST | /api/escrow/confirm-delivery | Mark delivered, release escrow to farmer |
+| POST | /api/escrow/confirm-delivery | Mark order completed and update internal payment status |
 | POST | /api/escrow/refund | Idempotent refund (see Refund safety) |
 | GET | /health | Escrow backend health check |
 
@@ -87,8 +89,8 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 
 ## Deployment
 - **Frontend — Vercel:** deploys from this repo. Set `VITE_ESCROW_API_URL` to the Render backend URL (see below), plus `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_RAZORPAY_KEY_ID`, `VITE_GOOGLE_MAPS_API_KEY`.
-- **Escrow backend — Render:** live at https://farmer-escrow-backend.onrender.com. `render.yaml` (Blueprint) defines the web service — `rootDir: backend`, build `npm install`, start `node server.js`, health check `/health`. Node is a bounded range (`NODE_VERSION: ">=22 <25"`), not an exact pin. Set these in the Render dashboard (never in the repo): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`.
-- **Database — Supabase (new project):** create a fresh project, apply the three migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
+- **Escrow backend — Render:** live at https://farmer-escrow-backend.onrender.com. `render.yaml` (Blueprint) defines the web service — `rootDir: backend`, build `npm install`, start `node server.js`, health check `/health`. Node is a bounded range (`NODE_VERSION: ">=22 <25"`), not an exact pin. Set these in the Render dashboard (never in the repo): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`.
+- **Database — Supabase (new project):** create a fresh project, apply all five migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
 
 ## Screenshots
 ![Homepage — hero and marketplace](docs/screenshots/homepage.png)
