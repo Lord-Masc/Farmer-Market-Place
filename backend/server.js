@@ -11,6 +11,11 @@ const PORT = process.env.PORT || 5001;
 
 app.disable('x-powered-by');
 
+// Render terminates TLS at its proxy, so req.ip is the proxy's IP unless
+// Express trusts it — without this, every client shares one rate-limit
+// bucket and no single abusive IP can be throttled (audit M1).
+app.set('trust proxy', 1);
+
 // Middleware — allowlisted CORS, security headers, rate limiting, JSON.
 // (2026-11-08 security fix: the wildcard CORS + no headers + no rate limit
 // that shipped before let any website call the escrow API.)
