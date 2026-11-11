@@ -28,7 +28,8 @@
 │   ├── 20261108_create_refunds.sql     # refunds ledger + claim_pending_refunds()
 │   ├── 20261109_security_hardening.sql # RLS policies, retry columns, CHECKs
 │   ├── 20261111_transaction_hardening.sql # atomic stock reservation + retry scheduling
-│   └── 20261112_profile_privacy.sql # private profiles + public farmer directory + signup trigger
+│   ├── 20261112_profile_privacy.sql # private profiles + public farmer directory + signup trigger
+│   └── 20261113_payment_binding.sql # bind Razorpay order IDs to internal orders
 ├── render.yaml           # Render Blueprint: how the backend deploys (rootDir backend)
 ├── docs/                 # Runbooks + the refund before/after report + screenshots
 ├── scripts/              # refund-concurrency-test.js — the live before/after test
@@ -84,13 +85,13 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 ## Setup
 1. `git clone` the repo and run `npm install` (root and `backend/` each have their own `package.json` where applicable)
 2. Copy each `.env.example` to `.env` and add your own keys — root `.env.example` (frontend), `backend/.env.example`. Never commit a real `.env`.
-3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql`, `20261108_create_refunds.sql`, `20261109_security_hardening.sql`, then `20261111_transaction_hardening.sql` (atomic stock reservation + retry scheduling), then `20261112_profile_privacy.sql` (private profiles + farmer directory + signup trigger).
+3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql`, `20261108_create_refunds.sql`, `20261109_security_hardening.sql`, then `20261111_transaction_hardening.sql` (atomic stock reservation + retry scheduling), then `20261112_profile_privacy.sql` (private profiles + farmer directory + signup trigger), then `20261113_payment_binding.sql` (Razorpay order binding).
 4. Run the frontend with `npm run dev`; run the escrow backend with `npm run dev` in `backend/` (port 5001).
 
 ## Deployment
 - **Frontend — Vercel:** deploys from this repo. Set `VITE_ESCROW_API_URL` to the Render backend URL (see below), plus `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_RAZORPAY_KEY_ID`, `VITE_GOOGLE_MAPS_API_KEY`.
 - **Escrow backend — Render:** live at https://farmer-escrow-backend.onrender.com. `render.yaml` (Blueprint) defines the web service — `rootDir: backend`, build `npm install`, start `node server.js`, health check `/health`. Node is a bounded range (`NODE_VERSION: ">=22 <25"`), not an exact pin. Set these in the Render dashboard (never in the repo): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`.
-- **Database — Supabase (new project):** create a fresh project, apply all five migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
+- **Database — Supabase (new project):** create a fresh project, apply all six migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
 
 ## Screenshots
 ![Homepage — hero and marketplace](docs/screenshots/homepage.png)
