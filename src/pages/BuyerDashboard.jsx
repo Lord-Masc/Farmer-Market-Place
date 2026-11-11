@@ -435,7 +435,7 @@ const BuyerDashboard = () => {
         });
         if(data.success) {
             setConfirmModal({ show: false, orderId: null });
-            setStatusMessage({ show: true, type: 'success', text: 'Success! Payment Released to Farmer. 🌾✅' });
+            setStatusMessage({ show: true, type: 'success', text: 'Order completed successfully. Payment status updated. 🌾✅' });
             fetchMyOrders();
             setTimeout(() => setStatusMessage({ show: false, type: 'success', text: '' }), 4000);
         } else {
@@ -779,7 +779,7 @@ const BuyerDashboard = () => {
                                                             deliveryAddress: order.delivery_address || '',
                                                             buyerPhone: order.buyer_phone || ''
                                                         });
-                                                        window.location.href = `/escrow-test?${orderParams.toString()}`;
+                                                        window.location.href = `/checkout?orderId=${encodeURIComponent(order.id)}`;
                                                    }}
                                                    className="bg-green-fresh text-white text-[10px] font-black uppercase px-6 py-3 rounded-2xl shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2 mx-auto lg:ml-auto"
                                                 >
