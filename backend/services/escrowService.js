@@ -103,8 +103,23 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
         console.error('Razorpay order request failed:', err.message);
         throw new AppError(503, 'PAYMENT_GATEWAY_UNAVAILABLE', 'Payment gateway is temporarily unavailable. Please try again.');
     }
-    if (Number(razorpayOrder.amount) !== Math.round(expected * 100) || !['created', 'attempted'].includes(razorpayOrder.status)) {
-        throw new AppError(409, 'PAYMENT_ALREADY_SUBMITTED', 'This payment attempt has already been submitted. Refresh your orders or contact support.');
+    if (Number(razorpayOrder.amount) !== Math.round(expected * 100)) {
+        throw new AppError(409, 'AMOUNT_MISMATCH', 'The gateway order amount does not match this marketplace order.');
+    }
+    if (razorpayOrder.status === 'paid') {
+        try {
+            const { items = [] } = await razorpay.orders.fetchPayments(order.razorpay_order_id);
+            const captured = items.find(item => item.status === 'captured' && Number(item.amount) === Math.round(expected * 100));
+            if (!captured) throw new Error('Captured payment not found');
+            await exports.verifyAndMarkPaid(order.id, order.razorpay_order_id, captured.id, buyerId);
+            return { order_id: order.id, amount: Math.round(expected * 100), alreadyPaid: true };
+        } catch (err) {
+            if (err instanceof AppError) throw err;
+            throw new AppError(503, 'PAYMENT_RECONCILIATION_PENDING', 'Payment was received by the gateway. Refresh your orders shortly while we reconcile it.');
+        }
+    }
+    if (!['created', 'attempted'].includes(razorpayOrder.status)) {
+        throw new AppError(409, 'PAYMENT_ORDER_UNAVAILABLE', 'This payment attempt is no longer available. Contact support.');
     }
     if (!order.razorpay_order_id) {
         const { data: saved, error: saveError } = await supabase.from('orders')
