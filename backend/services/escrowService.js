@@ -96,6 +96,11 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
             currency: 'INR',
             receipt: `order_${String(order.id).replace(/-/g, '').slice(0, 20)}`,
         }), 3, 1000);
+        const { data: saved, error: saveError } = await supabase.from('orders')
+            .update({ razorpay_order_id: razorpayOrder.id })
+            .eq('id', order.id).eq('status', 'confirmed').select('id');
+        if (saveError) throw saveError;
+        if (!saved?.length) throw new AppError(409, 'ORDER_NOT_PAYABLE', 'This order is no longer awaiting payment.');
         return { order_id: order.id, razorpay_order_id: razorpayOrder.id, amount: Math.round(expected * 100) };
     } catch (err) {
         console.error('Razorpay order creation failed:', err.message);
@@ -117,6 +122,9 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
     }
     if (order.status !== 'confirmed') {
         throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only a farmer-approved order can be paid.');
+    }
+    if (!order.razorpay_order_id || order.razorpay_order_id !== razorpay_order_id) {
+        throw new AppError(400, 'PAYMENT_ORDER_MISMATCH', 'This payment does not belong to the selected order.');
     }
 
     // The gateway is the source of truth, not the caller-supplied ids.
