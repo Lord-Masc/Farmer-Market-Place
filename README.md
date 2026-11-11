@@ -104,3 +104,12 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 ## Payment and payout limitation
 
 The app verifies Razorpay payments and records internal payment states. A database status such as `HELD` or `RELEASED` does **not** place funds in a legal escrow account or trigger a farmer payout. Automatic split settlements require a separately configured Razorpay Route/linked-account setup and merchant approval. Until that integration exists, the UI describes payment verification and order completion rather than claiming funds were released to a farmer.
+
+## AI-assisted development workflow
+
+This repository includes a project-specific AI collaboration guide:
+- Start with [AGENTS.md](AGENTS.md) before asking an AI coding agent to change code.
+- Read [docs/ai/README.md](docs/ai/README.md) for the required documentation workflow.
+- Keep handover, decisions, architecture, execution flow, bug/feature traces, constraints, test evidence, and rollback plans current.
+- Require a plan before implementation, one logical change per request, and a complete diff review before accepting changes.
+- Never merge, deploy, or apply production migrations without explicit approval.
