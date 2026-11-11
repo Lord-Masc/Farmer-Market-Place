@@ -6,11 +6,14 @@ DROP POLICY IF EXISTS "Users can view own profile." ON public.profiles;
 CREATE POLICY "Users can view own profile."
   ON public.profiles FOR SELECT USING (auth.uid() = id);
 
-CREATE OR REPLACE VIEW public.public_farmer_profiles AS
+CREATE OR REPLACE VIEW public.public_farmer_profiles WITH (security_invoker = false) AS
 SELECT id, first_name, last_name, role, state, city, phone_number, photo_url
 FROM public.profiles
 WHERE role = 'farmer';
-GRANT SELECT ON public.public_farmer_profiles TO anon, authenticated;
+-- security_invoker = false (Postgres 15+): the view runs as its owner, so the
+-- own-profile-only RLS policy on profiles does not make the directory empty.
+-- Without it the view would return 0 rows to every buyer (audit F1).
+GRANT SELECT ON public.public_farmer_profiles TO authenticated;
 
 -- Signup trigger: create the private profile from verified Auth user metadata.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -32,6 +35,14 @@ BEGIN
     NEW.raw_user_meta_data->>'state'
   )
   ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Never block auth signup because the profile insert failed; the
+  -- failure is logged (Postgres log) so it can be fixed, and the
+  -- profile can be backfilled. The normal path (correct metadata)
+  -- always creates the profile. (Restored — audit F2; the 20261109
+  -- version of this trigger had this block.)
+  RAISE WARNING 'handle_new_user failed for %: %', NEW.id, SQLERRM;
   RETURN NEW;
 END;
 $$;

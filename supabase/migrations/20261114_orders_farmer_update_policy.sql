@@ -1,0 +1,15 @@
+-- Close the direct-PostgREST farmer status bypass (PR #1 audit H1).
+-- The 20261109_security_hardening.sql policy "Farmers can update the status
+-- of their orders." let any farmer write any allowlisted status (including
+-- PAID, COMPLETED and REFUNDED) directly through the public PostgREST API,
+-- bypassing the backend state machine, the stock-reservation RPC and the
+-- payment checks. A farmer could mark an order REFUNDED with no gateway
+-- refund, CONFIRMED with no stock reservation (oversell), or PAID with no
+-- payment. All farmer transitions are owned by the escrow backend
+-- (updateOrderStatusWithStock / confirm_order_and_reserve_stock, reached via
+-- /api/escrow/* with a verified JWT), and the frontend performs no direct
+-- orders UPDATE — every status change goes through those routes. Dropping
+-- the policy therefore breaks nothing and leaves the backend as the only
+-- writer of order status. The service role bypasses RLS, so backend writes
+-- are unaffected.
+DROP POLICY IF EXISTS "Farmers can update the status of their orders." ON public.orders;
