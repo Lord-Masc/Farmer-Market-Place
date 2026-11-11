@@ -1,6 +1,5 @@
 # Farmer Marketplace — escrow backend on Render (Blueprint).
-# Frontend is on Vercel (farmer-market-place-mu.vercel.app); its origin is
-# already in the backend's default CORS allowlist, so no FRONTEND_URL needed.
+# Frontend domains are allowlisted in backend/middleware/security.js; no FRONTEND_URL needed.
 # Secrets below are placeholders (sync: false) — set real values in the
 # Render dashboard, never in this file.
 services:
@@ -19,8 +18,6 @@ services:
       - key: NODE_VERSION
         value: ">=22 <25"
       - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
