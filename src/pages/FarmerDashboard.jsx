@@ -982,7 +982,7 @@ const FarmerDashboard = () => {
                                     <div className="w-16 h-16 bg-cream rounded-2xl flex items-center justify-center text-3xl shadow-inner">📦</div>
                                     <div>
                                         <h4 className="text-lg font-black text-green-deep">{order.product?.name}</h4>
-                                        <p className="text-[10px] text-gray-400 font-black uppercase">Buyer: {order.buyer?.first_name} · <span className="text-green-fresh">₹{order.total_price}</span></p>
+                                        <p className="text-[10px] text-gray-400 font-black uppercase">Buyer: {order.buyer_name || 'Buyer'} · <span className="text-green-fresh">₹{order.total_price}</span></p>
                                     </div>
                                 </div>
 

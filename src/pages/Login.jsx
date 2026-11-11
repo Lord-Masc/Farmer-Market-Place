@@ -112,8 +112,9 @@ const Login = () => {
 
         <form className="space-y-5" onSubmit={handleLogin}>
           <div className="space-y-1.5 text-left">
-            <label className="text-sm font-medium text-green-deep block">Email Address</label>
+            <label htmlFor="identifier" className="text-sm font-medium text-green-deep block">Email Address</label>
             <input 
+              id="identifier"
               type="text" 
               required
               value={identifier}

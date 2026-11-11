@@ -36,7 +36,9 @@ const Checkout = () => {
                 if (orderId) {
                     const { data, error: orderError } = await supabase.from('orders')
                         .select('*').eq('id', orderId).eq('buyer_id', user.id).single();
-                    if (orderError) throw orderError;
+                    if (orderError) throw orderError.code === 'PGRST116' ? new Error('Order not found.') : orderError;
+                    if (data.status === 'PAID') throw new Error('This order is already paid.');
+                    if (data.status === 'declined') throw new Error('The farmer declined this request.');
                     if (data.status !== 'confirmed') throw new Error('Payment is available only after farmer approval.');
                     setOrder(data);
                     setQuantity(data.quantity);
@@ -56,7 +58,7 @@ const Checkout = () => {
                 setLoading(false);
             }
         };
-        load();
+        void load();
     }, [user?.id, orderId, productId]);
 
     const unit = product?.unit || 'kg';
@@ -119,7 +121,7 @@ const Checkout = () => {
                                             <input className="mt-1 w-full border rounded-xl p-3" value={phone} onChange={e => setPhone(e.target.value)} />
                                         </label>
                                         {error && <p className="text-sm text-red-600">{error}</p>}
-                                        <button disabled={saving} className="w-full bg-emerald-600 text-white rounded-xl p-4 font-bold disabled:opacity-50">
+                                        <button type="submit" disabled={saving} className="w-full bg-emerald-600 text-white rounded-xl p-4 font-bold disabled:opacity-50">
                                             {saving ? 'Sending request...' : 'Send order request'}
                                         </button>
                                         <p className="text-xs text-slate-500">Payment becomes available after the farmer approves your request.</p>
