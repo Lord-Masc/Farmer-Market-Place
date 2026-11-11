@@ -525,7 +525,7 @@ const FarmerDashboard = () => {
   };
 
   const renderStats = () => {
-    const totalEarnings = orders.filter(o => o.status === 'delivered').reduce((acc, curr) => acc + curr.total_price, 0);
+    const totalEarnings = orders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').reduce((acc, curr) => acc + curr.total_price, 0);
     const stats = [
         { label: 'Total Earnings', value: `₹${totalEarnings || '0'}`, icon: '💰', trend: 'Lifetime income' },
         { label: 'Active Listings', value: products.length.toString(), icon: '🌾', trend: 'Live products' },
@@ -684,8 +684,8 @@ const FarmerDashboard = () => {
                                                 'bg-green-fresh/20 text-green-fresh'
                                             }`}>
                                                 {(order.status === 'pending' || order.status === 'CREATED') ? 'New Request' : 
-                                                 order.status === 'PAID' ? 'Payment Held (Escrow)' :
-                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Completed & Released' : 
+                                                 order.status === 'PAID' ? 'Payment Verified' :
+                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Order Completed' : 
                                                  order.status === 'declined' ? 'Request Rejected' :
                                                  order.status}
                                             </span>
@@ -1025,7 +1025,7 @@ const FarmerDashboard = () => {
                                 <div className="bg-cream/30 p-6 rounded-[24px] text-center lg:text-right min-w-[220px]">
                                     <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-tighter">Current Money Status</p>
                                     <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber'}`}>
-                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? '💸 PAID TO YOU' : '🔒 SECURELY HELD'}
+                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
                                     </p>
                                     {order.status !== 'COMPLETED' && order.status !== 'delivered' && (
                                         <p className="text-[9px] text-gray-400 italic mt-2">Will be released once buyer confirms delivery.</p>
