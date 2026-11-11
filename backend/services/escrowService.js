@@ -66,10 +66,8 @@ async function fetchOrder(order_id) {
 
 // 1. Create Razorpay Order.
 // Price binding: the charge must equal the product's listed price x quantity.
-// The product row is the source of truth — a forged client-side amount (or a
-// forged seller) can never reach Razorpay. The stored total_price is always
-// the server-validated amount, so a forged direct-insert total is corrected
-// here before any money moves.
+// The product row is the source of truth. A client-supplied amount or seller
+// is never trusted; the stored order total must match the current listing.
 exports.createRazorpayOrder = async (buyerId, orderId) => {
     if (!orderId) throw new AppError(400, 'MISSING_ORDER', 'An approved order is required.');
     const order = await fetchOrder(orderId);
@@ -136,8 +134,8 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
 // controller, then this verifies (a) the payment exists at Razorpay and is
 // captured, (b) its amount equals the order total, (c) it belongs to the
 // Razorpay order used at checkout, and (d) it has not already been used for
-// another order (replay). Only CREATED orders can become PAID, and only by
-// their own buyer. The recorded payment amount is the gateway-verified one.
+// another order (replay). Only a farmer-approved order can become PAID,
+// and only by its own buyer. The recorded amount comes from Razorpay.
 exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment_id, buyer_id) => {
     const order = await fetchOrder(order_id);
     if (order.buyer_id !== buyer_id) throw new AppError(403, 'FORBIDDEN', 'You can only pay for your own orders.');
@@ -196,8 +194,8 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
 };
 
 // 2b. Farmer Update Status Logic (with Stock Management).
-// Allowed farmer transitions. COMPLETED is intentionally absent: it is only
-// reachable via confirm-delivery, which also releases the escrow payment.
+// Allowed farmer transitions. COMPLETED is intentionally absent: only the
+// buyer's delivery confirmation can complete an order and update payment status.
 // There is no path back from 'confirmed'/'declined' — a revert would let a
 // second confirm decrement stock again.
 const ORDER_TRANSITIONS = {
@@ -253,7 +251,7 @@ exports.markOrderAsShipped = async (order_id, farmer_id) => {
     return updated;
 };
 
-// 4. Mark Order as Completed (RELEASES ESCROW) — buyer-only, only from PAID
+// 4. Mark Order as Completed — buyer-only, only from PAID
 // or SHIPPED, and only with a HELD payment. The order update is the
 // serialization point (gated on PAID/SHIPPED); if the payment release then
 // finds no HELD payment, the order is rolled back to its previous status.
