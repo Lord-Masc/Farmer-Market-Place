@@ -121,7 +121,6 @@ const EscrowCheckout = ({ orderId, amount, productName }) => {
                 currency: 'INR',
                 name: 'AgroConnect',
                 description: `Secure payment for ${productName || 'Farm Product'}`,
-                image: 'https://ibelaipphuggkncovptw.supabase.co/storage/v1/object/public/logos/agroconnect-logo.png',
                 order_id: order.razorpay_order_id,
                 prefill: {},
                 theme: { color: '#16a34a' },
