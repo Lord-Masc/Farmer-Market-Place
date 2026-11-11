@@ -17,6 +17,7 @@ const Checkout = () => {
     const [quantity, setQuantity] = useState(1);
     const [address, setAddress] = useState('');
     const [phone, setPhone] = useState('');
+    const [buyerName, setBuyerName] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -28,6 +29,7 @@ const Checkout = () => {
                 const { data: profile } = await supabase.from('profiles')
                     .select('address,phone_number,phone').eq('id', user.id).single();
                 setAddress(profile?.address || '');
+                setBuyerName([profile?.first_name, profile?.last_name].filter(Boolean).join(' '));
                 setPhone(profile?.phone_number || profile?.phone || '');
 
                 let selectedProductId = productId;
@@ -76,7 +78,7 @@ const Checkout = () => {
         setError('');
         try {
             const { error: insertError } = await supabase.from('orders').insert({
-                buyer_id: user.id, farmer_id: product.farmer_id, product_id: product.id,
+                buyer_id: user.id, farmer_id: product.farmer_id, product_id: product.id, buyer_name: buyerName,
                 quantity: qty, unit_at_order: unit, total_price: total, status: 'pending',
                 delivery_address: address.trim(), buyer_phone: phone.trim(),
             });
