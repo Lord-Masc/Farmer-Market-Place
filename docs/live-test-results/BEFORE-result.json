@@ -1,0 +1,16 @@
+{
+  "startedAt": "2026-11-08T11:45:26.902Z",
+  "requestsSent": 50,
+  "httpSuccess": 50,
+  "httpFailed": 0,
+  "cronRuns": 2,
+  "refundRows": 0,
+  "totalRefunded": 0,
+  "p95LatencyMs": 26704,
+  "orderStatusAfter": "REFUNDED",
+  "paymentStatusAfter": "REFUNDED",
+  "notes": [
+    "test order created (id kept out of output for brevity; total=499)",
+    "backend server up on port 5001"
+  ]
+}

@@ -1,18 +1,30 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const orderRoutes = require('./routes/orderRoutes');
 const cron = require('node-cron');
-const { autoRefundJob } = require('./services/escrowService');
+const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
+const { corsMiddleware, securityHeaders, rateLimit } = require('./middleware/security');
+const { errorHandler } = require('./utils/errors');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
 
-// Routes
+// Render terminates TLS at its proxy, so req.ip is the proxy's IP unless
+// Express trusts it — without this, every client shares one rate-limit
+// bucket and no single abusive IP can be throttled (audit M1).
+app.set('trust proxy', 1);
+
+// Middleware — allowlisted CORS, security headers, rate limiting, JSON.
+// (2026-11-08 security fix: the wildcard CORS + no headers + no rate limit
+// that shipped before let any website call the escrow API.)
+app.use(corsMiddleware);
+app.use(securityHeaders);
+app.use(express.json());
+app.use(rateLimit());
+
+// Routes (every escrow route requires a verified Supabase JWT — see routes).
 app.use('/api/escrow', orderRoutes);
 app.use('/api/orders', orderRoutes); // Legacy support for farmer dashboard
 
@@ -21,20 +33,18 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok', time: new Date() });
 });
 
-// Debug endpoint to check env vars
-app.get('/debug/config', (req, res) => {
-    res.json({
-        razorpay_key_id: process.env.RAZORPAY_KEY_ID ? '✅ Set' : '❌ Missing',
-        razorpay_key_secret: process.env.RAZORPAY_KEY_SECRET ? '✅ Set' : '❌ Missing',
-        supabase_url: process.env.SUPABASE_URL ? '✅ Set' : '❌ Missing',
-        node_env: process.env.NODE_ENV || 'development'
-    });
-});
+// NOTE: GET /debug/config was removed in the 2026-11-08 security fix — it
+// disclosed environment-variable presence to unauthenticated callers.
 
-// Start Cron Jab for Auto Refund (Every hour)
+// Central error handler (must be last; returns generic messages only).
+app.use(errorHandler);
+
+// Start Cron Job for Auto Refund (Every hour)
 cron.schedule('0 * * * *', async () => {
     console.log('Running Auto Refund Job...');
     await autoRefundJob();
+    // Reconcile refunds whose gateway call succeeded but a later write failed.
+    await reconcileRefunds();
 });
 
 app.listen(PORT, () => {

@@ -7,18 +7,25 @@ import Footer from '../components/Footer';
 const EscrowTest = () => {
     const [searchParams] = useSearchParams();
 
-    // Fetch dynamic parameters from URL
+    // Dev-only test page: never render the unauthenticated checkout
+    // harness in a production build.
+    if (!import.meta.env.DEV) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex flex-col">
+                <Navbar />
+                <main className="flex-grow flex items-center justify-center">
+                    <p className="text-slate-500 font-bold">Not available</p>
+                </main>
+                <Footer />
+            </div>
+        );
+    }
+
+    // Fetch dynamic parameters from URL (only what EscrowCheckout takes).
     const dynamicData = {
         orderId: searchParams.get('orderId') || '',
-        productId: searchParams.get('productId') || '',
-        buyerId: searchParams.get('buyerId') || '',
-        sellerId: searchParams.get('sellerId') || '',
         amount: parseFloat(searchParams.get('amount') || '0') || 0,
         productName: searchParams.get('productName') || 'Fresh Harvest',
-        quantity: searchParams.get('quantity') || '0',
-        unit: searchParams.get('unit') || 'kg',
-        deliveryAddress: searchParams.get('deliveryAddress') || '',
-        buyerPhone: searchParams.get('buyerPhone') || ''
     };
 
     return (
@@ -34,18 +41,18 @@ const EscrowTest = () => {
                             🛡️ AgroConnect Secure Escrow
                         </div>
                         <h1 className="text-4xl md:text-5xl font-black text-slate-900 leading-tight font-playfair">
-                            Your Payment is <span className="text-emerald-600 underline decoration-emerald-200 underline-offset-8">Fully Protected.</span>
+                            Test a <span className="text-emerald-600 underline decoration-emerald-200 underline-offset-8">Verified Payment.</span>
                         </h1>
                         <p className="text-lg text-slate-600 leading-relaxed max-w-lg">
-                            We don't send your money to the farmer immediately. We hold it in a secure app-wallet until you receive your harvest.
+                            Payments are verified by the backend and recorded. Automatic farmer payouts are not configured yet.
                         </p>
                         
                         <div className="space-y-6">
                             <div className="flex items-start gap-4 bg-white p-5 rounded-3xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
                                 <div className="w-10 h-10 rounded-2xl bg-emerald-500 flex items-center justify-center text-white shrink-0 shadow-lg shadow-emerald-200 font-bold">1</div>
                                 <div>
-                                    <p className="font-bold text-slate-800">Secure Payment Hold</p>
-                                    <p className="text-sm text-slate-500">Your money is deducted but held by AgroConnect, not the farmer.</p>
+                                    <p className="font-bold text-slate-800">Payment Verification</p>
+                                    <p className="text-sm text-slate-500">The backend verifies the Razorpay payment and records it.</p>
                                 </div>
                             </div>
                             <div className="flex items-start gap-4 bg-white p-5 rounded-3xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
@@ -58,8 +65,8 @@ const EscrowTest = () => {
                             <div className="flex items-start gap-4 bg-white p-5 rounded-3xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
                                 <div className="w-10 h-10 rounded-2xl bg-emerald-500 flex items-center justify-center text-white shrink-0 shadow-lg shadow-emerald-200 font-bold">3</div>
                                 <div>
-                                    <p className="font-bold text-slate-800">Release Funds</p>
-                                    <p className="text-sm text-slate-500">Only after you click "Confirm Received" do we pay the farmer.</p>
+                                    <p className="font-bold text-slate-800">Order Completion</p>
+                                    <p className="text-sm text-slate-500">Confirm receipt after delivery to complete the order.</p>
                                 </div>
                             </div>
                         </div>
@@ -69,15 +76,8 @@ const EscrowTest = () => {
                     <div className="w-full lg:sticky lg:top-32">
                         <EscrowCheckout 
                             orderId={dynamicData.orderId}
-                            productId={dynamicData.productId}
-                            buyerId={dynamicData.buyerId}
-                            sellerId={dynamicData.sellerId}
                             amount={dynamicData.amount}
                             productName={dynamicData.productName}
-                            quantity={dynamicData.quantity}
-                            unit={dynamicData.unit}
-                            deliveryAddress={dynamicData.deliveryAddress}
-                            buyerPhone={dynamicData.buyerPhone}
                         />
                     </div>
                 </div>

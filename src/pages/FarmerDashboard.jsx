@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { escrowFetch } from '../services/escrowApi';
+import { validateImageFile } from '../utils/fileValidation';
 
 const FarmerDashboard = () => {
   const { user, signOut } = useAuth();
@@ -57,7 +59,8 @@ const FarmerDashboard = () => {
     const fallbackGeocode = async (lat, lng) => {
         try {
             // (1) Attempt Direct Google API (Might hit CORS)
-            const apiKey = 'AIzaSyBB7MHzXVXJVyBfuWfd5zvVI1KSLOcNM1A';
+            const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+            if (!apiKey) throw new Error('Google Maps API key not configured');
             const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`);
             const data = await res.json();
             if (data.results && data.results[0]) {
@@ -256,16 +259,10 @@ const FarmerDashboard = () => {
         const productsMap = {};
         if (products) products.forEach(p => productsMap[p.id] = p);
 
-        // Fetch buyers manually
-        const buyerIds = [...new Set(rawOrders.map(o => o.buyer_id).filter(Boolean))];
-        const { data: buyers } = await supabase.from('profiles').select('id, first_name, last_name, phone_number, phone').in('id', buyerIds);
-        const buyersMap = {};
-        if (buyers) buyers.forEach(b => buyersMap[b.id] = b);
-
         const mergedOrders = rawOrders.map(o => ({
             ...o,
             product: productsMap[o.product_id] || {},
-            buyer: buyersMap[o.buyer_id] || {}
+            buyer: { first_name: o.buyer_name || 'Buyer' }
         }));
 
         setOrders(mergedOrders || []);
@@ -296,6 +293,9 @@ const FarmerDashboard = () => {
   };
 
   const uploadPhoto = async (file) => {
+    const validationError = validateImageFile(file);
+    if (validationError) throw new Error(validationError);
+
     const fileExt = file.name.split('.').pop();
     const fileName = `${user.id}-${Math.random()}.${fileExt}`;
     const filePath = `product-items/${fileName}`;
@@ -315,6 +315,19 @@ const FarmerDashboard = () => {
 
   const handlePublishProduct = async (e) => {
     e.preventDefault();
+
+    // Validate price / quantity before any upload or DB write.
+    const parsedPrice = parseFloat(formData.user_price);
+    const parsedQuantity = parseFloat(formData.quantity);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+        alert("Please enter a valid selling price greater than 0.");
+        return;
+    }
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+        alert("Please enter a valid quantity greater than 0.");
+        return;
+    }
+
     if (!editingProduct && (!photo1 || !photo2)) {
         alert("Please upload 2 photos.");
         return;
@@ -347,12 +360,14 @@ const FarmerDashboard = () => {
                         pLng = result.lng();
                     }
                 } else {
-                    const apiKey = 'AIzaSyBB7MHzXVXJVyBfuWfd5zvVI1KSLOcNM1A';
-                    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(formData.address)}&key=${apiKey}`);
-                    const data = await res.json();
-                    if (data.results?.[0]) {
-                        pLat = data.results[0].geometry.location.lat;
-                        pLng = data.results[0].geometry.location.lng;
+                    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+                    if (apiKey) {
+                        const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(formData.address)}&key=${apiKey}`);
+                        const data = await res.json();
+                        if (data.results?.[0]) {
+                            pLat = data.results[0].geometry.location.lat;
+                            pLng = data.results[0].geometry.location.lng;
+                        }
                     }
                 }
             } catch (err) {
@@ -369,8 +384,8 @@ const FarmerDashboard = () => {
         const productData = {
             ...formData,
             farmer_id: user.id,
-            user_price: parseFloat(formData.user_price),
-            quantity: parseFloat(formData.quantity),
+            user_price: parsedPrice,
+            quantity: parsedQuantity,
             image_url_1: url1,
             image_url_2: url2,
             gov_price: 0,
@@ -379,7 +394,10 @@ const FarmerDashboard = () => {
         };
 
         if (editingProduct) {
-            const { error } = await supabase.from('products').update(productData).eq('id', editingProduct.id);
+            // Never let the client reassign ownership: farmer_id stays out
+            // of the update payload, and the update is scoped to the owner.
+            const { farmer_id: _farmerId, ...updateData } = productData;
+            const { error } = await supabase.from('products').update(updateData).eq('id', editingProduct.id).eq('farmer_id', user.id);
             if (error) throw error;
             setListingSuccessMsg("Crop Updated Successfully! 🚜✨");
             setShowListingSuccess(true);
@@ -425,10 +443,23 @@ const FarmerDashboard = () => {
 
   const handleDeleteProduct = async () => {
     if (!productToDelete) return;
-    
+
     setIsDeleting(true);
     try {
-        const { error } = await supabase.from('products').delete().eq('id', productToDelete.id);
+        // Refuse while any non-cancelled / non-declined order references it.
+        const { data: activeOrders, error: ordersError } = await supabase
+            .from('orders')
+            .select('id')
+            .eq('product_id', productToDelete.id)
+            .not('status', 'in', '(cancelled,declined)')
+            .limit(1);
+
+        if (ordersError) throw ordersError;
+        if (activeOrders && activeOrders.length > 0) {
+            throw new Error("Cannot delete this product because there are active orders for it. 📦 Please fulfill or cancel those orders first.");
+        }
+
+        const { error } = await supabase.from('products').delete().eq('id', productToDelete.id).eq('farmer_id', user.id);
         
         if (error) {
             // Detailed error handling for foreign key constraint (if product has orders)
@@ -460,51 +491,24 @@ const FarmerDashboard = () => {
 
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     if (!orderId || !newStatus) return;
-    
+
     setProcessingOrders(prev => ({ ...prev, [orderId]: true }));
     try {
-        // Step 1: Fetch the order + product details (uses farmer's auth session — RLS OK)
-        const { data: orderData, error: orderError } = await supabase
-            .from('orders')
-            .select('*, product:products(*)')
-            .eq('id', orderId)
-            .single();
-
-        if (orderError) throw new Error("Order not found: " + orderError.message);
-        if (orderData.farmer_id !== user.id) throw new Error("Unauthorized: This order doesn't belong to you.");
-
-        // Step 2: If approving ('confirmed'), reduce product stock
-        if (newStatus === 'confirmed' && (orderData.status === 'pending' || orderData.status === 'CREATED')) {
-            const orderQty = orderData.unit_at_order === 'quintal' ? (orderData.quantity * 100) : (orderData.quantity || 0);
-            const currentStock = orderData.product?.quantity || 0;
-
-            if (currentStock < orderQty) {
-                throw new Error(`🚨 Not Enough Stock: You only have ${currentStock} KG available.`);
-            }
-
-            // Reduce Stock
-            const { error: stockError } = await supabase
-                .from('products')
-                .update({ quantity: currentStock - orderQty })
-                .eq('id', orderData.product_id);
-
-            if (stockError) throw new Error("Stock update failed: " + stockError.message);
-        }
-
-        // Step 3: Update order status (uses farmer's auth session — RLS OK)
-        const { error: updateError } = await supabase
-            .from('orders')
-            .update({ status: newStatus })
-            .eq('id', orderId);
-
-        if (updateError) throw new Error("Status update failed: " + updateError.message);
+        // Order status (incl. stock decrement + transition rules) is owned
+        // by the escrow backend, which applies it atomically and enforces
+        // the allowed-transition map for the authenticated farmer.
+        // escrowFetch throws (with the backend's error message) on rejection.
+        await escrowFetch('/update-status', {
+            method: 'POST',
+            body: { orderId, newStatus }
+        });
 
         // UI Update
         setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
-        
+
         // Data Refresh
         fetchMyOrders();
-        fetchMyProducts(); 
+        fetchMyProducts();
 
     } catch (err) {
         console.error("Status update failed:", err);
@@ -515,7 +519,7 @@ const FarmerDashboard = () => {
   };
 
   const renderStats = () => {
-    const totalEarnings = orders.filter(o => o.status === 'delivered').reduce((acc, curr) => acc + curr.total_price, 0);
+    const totalEarnings = orders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').reduce((acc, curr) => acc + curr.total_price, 0);
     const stats = [
         { label: 'Total Earnings', value: `₹${totalEarnings || '0'}`, icon: '💰', trend: 'Lifetime income' },
         { label: 'Active Listings', value: products.length.toString(), icon: '🌾', trend: 'Live products' },
@@ -652,10 +656,10 @@ const FarmerDashboard = () => {
                                     </td>
                                     <td className="p-6">
                                         <div className="flex flex-col gap-1">
-                                            <p className="text-sm font-bold text-green-deep uppercase tracking-tighter">👤 {order.buyer?.first_name} {order.buyer?.last_name || ''}</p>
+                                            <p className="text-sm font-bold text-green-deep uppercase tracking-tighter">👤 {order.buyer_name || 'Buyer'}</p>
                                             <div className="flex flex-col">
                                                 <p className="text-[10px] text-gray-400 font-bold uppercase">🏠 TO: {order.delivery_address || 'Profile Location'}</p>
-                                                <p className="text-[10px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.buyer_phone || order.buyer?.phone_number || order.buyer?.phone || 'No Phone'}</p>
+                                                <p className="text-[10px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.buyer_phone || 'No Phone'}</p>
                                             </div>
                                         </div>
                                     </td>
@@ -674,8 +678,8 @@ const FarmerDashboard = () => {
                                                 'bg-green-fresh/20 text-green-fresh'
                                             }`}>
                                                 {(order.status === 'pending' || order.status === 'CREATED') ? 'New Request' : 
-                                                 order.status === 'PAID' ? 'Payment Held (Escrow)' :
-                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Completed & Released' : 
+                                                 order.status === 'PAID' ? 'Payment Verified' :
+                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Order Completed' : 
                                                  order.status === 'declined' ? 'Request Rejected' :
                                                  order.status}
                                             </span>
@@ -706,7 +710,7 @@ const FarmerDashboard = () => {
                                             )}
                                             {order.status === 'PAID' && (
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1 opacity-90 animate-pulse">
-                                                    <span>📦</span> Payment Held. Dispatch Now!
+                                                    <span>📦</span> Payment Verified. Dispatch Now!
                                                 </span>
                                             )}
                                             {(order.status === 'delivered' || order.status === 'COMPLETED') && (
@@ -861,6 +865,8 @@ const FarmerDashboard = () => {
                              <input type="file" className="hidden" onChange={async (e) => {
                                  const file = e.target.files[0];
                                  if (file) {
+                                     const validationError = validateImageFile(file);
+                                     if (validationError) { alert(validationError); return; }
                                      try {
                                          const fileName = `farmer-p-${user.id}-${Date.now()}`;
                                          const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
@@ -960,7 +966,7 @@ const FarmerDashboard = () => {
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-cream-dark">
                 <h2 className="font-playfair text-2xl font-black text-green-deep">Income Tracker 💸</h2>
-                <p className="text-gray-400 text-sm font-bold">Track your payments being held in the secure Agro-Vault.</p>
+                <p className="text-gray-400 text-sm font-bold">Track verified payments and completed orders.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-6">
@@ -976,7 +982,7 @@ const FarmerDashboard = () => {
                                     <div className="w-16 h-16 bg-cream rounded-2xl flex items-center justify-center text-3xl shadow-inner">📦</div>
                                     <div>
                                         <h4 className="text-lg font-black text-green-deep">{order.product?.name}</h4>
-                                        <p className="text-[10px] text-gray-400 font-black uppercase">Buyer: {order.buyer?.first_name} · <span className="text-green-fresh">₹{order.total_price}</span></p>
+                                        <p className="text-[10px] text-gray-400 font-black uppercase">Buyer: {order.buyer_name || 'Buyer'} · <span className="text-green-fresh">₹{order.total_price}</span></p>
                                     </div>
                                 </div>
 
@@ -999,7 +1005,7 @@ const FarmerDashboard = () => {
                                                 {(order.status === 'COMPLETED' || order.status === 'delivered') ? '✅' : '🛡️'}
                                             </div>
                                             <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber animate-pulse'}`}>
-                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Escrow Released' : 'Held in Vault'}
+                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Order Completed' : 'Payment Verified'}
                                             </p>
                                         </div>
 
@@ -1013,10 +1019,10 @@ const FarmerDashboard = () => {
                                 <div className="bg-cream/30 p-6 rounded-[24px] text-center lg:text-right min-w-[220px]">
                                     <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-tighter">Current Money Status</p>
                                     <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber'}`}>
-                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? '💸 PAID TO YOU' : '🔒 SECURELY HELD'}
+                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
                                     </p>
                                     {order.status !== 'COMPLETED' && order.status !== 'delivered' && (
-                                        <p className="text-[9px] text-gray-400 italic mt-2">Will be released once buyer confirms delivery.</p>
+                                        <p className="text-[9px] text-gray-400 italic mt-2">Automatic farmer payouts are not configured yet.</p>
                                     )}
                                 </div>
                             </div>
@@ -1104,7 +1110,7 @@ const FarmerDashboard = () => {
                   </div>
                   <form onSubmit={handlePublishProduct} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto max-h-[70vh]">
                       <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Crop Name</label><input required className="w-full bg-cream rounded-xl p-4 mt-1 border" placeholder="Wheat..." value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-                      <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" className="w-full bg-cream rounded-xl p-4 mt-1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} /></div>
+                      <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" min="1" step="1" className="w-full bg-cream rounded-xl p-4 mt-1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} /></div>
                       <div><label className="text-xs font-bold uppercase text-gray-400">Unit</label><select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})}><option>kg</option><option>quintal</option></select></div>
                       <div className="md:col-span-2">
                         <label className="text-xs font-bold uppercase text-gray-400 font-black tracking-widest">Crop Category</label>
@@ -1136,7 +1142,7 @@ const FarmerDashboard = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Selling Price</label><input required type="number" className="w-full bg-cream rounded-xl p-4 mt-1 border-2 border-green-fresh" placeholder="₹" value={formData.user_price} onChange={e => setFormData({...formData, user_price: e.target.value})} /></div>
+                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Selling Price</label><input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1 border-2 border-green-fresh" placeholder="₹" value={formData.user_price} onChange={e => setFormData({...formData, user_price: e.target.value})} /></div>
                       <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Harvest Address</label><textarea required className="w-full bg-cream rounded-xl p-4 mt-1 border min-h-[80px]" placeholder="Specific field location, village, or warehouse address..." value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
                       <div className="md:col-span-2 grid grid-cols-2 gap-4">
                           <label className="col-span-2 text-xs font-bold uppercase text-gray-400">Crop Photos {editingProduct && '(Leave empty to keep current)'}</label>
@@ -1287,7 +1293,7 @@ const FarmerDashboard = () => {
                   <div>
                       <h4 className="text-md font-black text-green-deep mb-1">Buyer has Paid! ✨</h4>
                       <p className="text-xs text-gray-500 font-bold leading-relaxed">
-                          A payment of <span className="text-green-fresh">₹{escrowNotification.amount}</span> for Order #{escrowNotification.orderId.slice(0,6)} is now **Held in Escrow**.
+                          A payment of <span className="text-green-fresh">₹{escrowNotification.amount}</span> for Order #{escrowNotification.orderId.slice(0,6)} has been verified by Razorpay.
                       </p>
                       <button 
                          onClick={() => { setActiveTab('Payment Track'); setEscrowNotification({ show: false, orderId: null, amount: 0 }); }}

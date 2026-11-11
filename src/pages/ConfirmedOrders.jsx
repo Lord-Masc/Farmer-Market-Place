@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
+import { escrowFetch } from '../services/escrowApi';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 
@@ -30,15 +31,13 @@ const ConfirmedOrders = () => {
 
     const handleConfirmDelivery = async (id) => {
         try {
-            const res = await fetch('http://localhost:5001/api/escrow/confirm-delivery', {
+            const data = await escrowFetch('/confirm-delivery', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ order_id: id })
+                body: { order_id: id }
             });
-            const data = await res.json();
             if(data.success) {
                 setConfirmModal({ show: false, orderId: null });
-                setStatusToast({ show: true, type: 'success', text: 'Payment Released to Farmer! 🌾✅' });
+                setStatusToast({ show: true, type: 'success', text: 'Order completed successfully. Payment status updated.' });
                 fetchConfirmedOrders();
                 setTimeout(() => setStatusToast({ show: false, type: 'success', text: '' }), 4000);
             }

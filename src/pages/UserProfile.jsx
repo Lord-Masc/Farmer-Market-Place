@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { validateImageFile } from '../utils/fileValidation';
 
 const UserProfile = () => {
     const { user } = useAuth();
@@ -63,6 +64,8 @@ const UserProfile = () => {
                                  <input type="file" className="hidden" onChange={async (e) => {
                                      const file = e.target.files[0];
                                      if (file) {
+                                         const validationError = validateImageFile(file);
+                                         if (validationError) { alert(validationError); return; }
                                          try {
                                              const fileName = `profile-${user.id}-${Date.now()}`;
                                              const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);

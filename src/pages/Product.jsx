@@ -103,12 +103,7 @@ const Products = () => {
                     <span className="text-xs text-gray-400 font-medium ml-1">/{product.unit}</span>
                   </div>
                   
-                  <Link 
-                    to={`/checkout?productId=${product.id}&amount=${product.user_price || product.price}&sellerId=${product.farmer_id || product.seller_id || ''}&productName=${encodeURIComponent(product.name)}`}
-                    className="px-4 py-2 bg-green-deep text-white rounded-full flex items-center justify-center font-bold text-sm hover:bg-green-mid hover:-translate-y-1 transition-all shadow-md"
-                  >
-                    Buy Now
-                  </Link>
+                  {product.farmer_id ? <Link to={`/checkout?productId=${product.id}`} className="px-4 py-2 bg-green-deep text-white rounded-full font-bold text-sm hover:bg-green-mid transition-all shadow-md">Buy Now</Link> : <span className="text-xs text-gray-400">Sample product</span>}
                 </div>
               </div>
             ))}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { escrowFetch } from '../services/escrowApi';
 
 // ✅ Payment Success Popup
 const PaymentSuccessModal = ({ amount, onClose }) => (
@@ -14,12 +15,12 @@ const PaymentSuccessModal = ({ amount, onClose }) => (
             </div>
 
             <div className="mt-8">
-                <h2 className="text-2xl font-black text-slate-900 mb-1">Payment Secured!</h2>
-                <p className="text-slate-500 text-sm mb-6">Your order request has been sent to the farmer.</p>
+                <h2 className="text-2xl font-black text-slate-900 mb-1">Payment Verified</h2>
+                <p className="text-slate-500 text-sm mb-6">Your Razorpay payment has been verified and recorded.</p>
 
                 {/* Amount badge */}
                 <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-6">
-                    <p className="text-xs text-emerald-600 font-bold uppercase tracking-widest mb-1">Amount Held in Escrow</p>
+                    <p className="text-xs text-emerald-600 font-bold uppercase tracking-widest mb-1">Payment Received</p>
                     <p className="text-4xl font-black text-emerald-700">₹{amount}</p>
                 </div>
 
@@ -28,22 +29,22 @@ const PaymentSuccessModal = ({ amount, onClose }) => (
                     <div className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl">
                         <span className="text-2xl">🛡️</span>
                         <div>
-                            <p className="font-bold text-slate-800 text-sm">Your payment is held safely</p>
-                            <p className="text-xs text-slate-500">Money is locked inside AgroConnect — not sent to farmer yet.</p>
+                            <p className="font-bold text-slate-800 text-sm">Payment verified</p>
+                            <p className="text-xs text-slate-500">AgroConnect has recorded the payment status. Automatic farmer payouts are not configured yet.</p>
                         </div>
                     </div>
                     <div className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl border border-emerald-100">
                         <span className="text-2xl">🚜</span>
                         <div>
-                            <p className="font-bold text-slate-800 text-sm">Escrow Release</p>
-                            <p className="text-xs text-slate-500">The farmer only gets the money when you click the "Confirm Received" button after checking your product.</p>
+                            <p className="font-bold text-slate-800 text-sm">Order completion</p>
+                            <p className="text-xs text-slate-500">Confirm receipt after checking the delivered product.</p>
                         </div>
                     </div>
                     <div className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl">
                         <span className="text-2xl">↩️</span>
                         <div>
-                            <p className="font-bold text-slate-800 text-sm">Auto-refund if not delivered</p>
-                            <p className="text-xs text-slate-500">If your product isn't delivered in 2 days, you get a full refund automatically.</p>
+                            <p className="font-bold text-slate-800 text-sm">Delivery follow-up</p>
+                            <p className="text-xs text-slate-500">Overdue orders enter the refund process. Refund timing depends on the payment gateway.</p>
                         </div>
                     </div>
                 </div>
@@ -68,7 +69,7 @@ const PaymentSuccessModal = ({ amount, onClose }) => (
     </div>
 );
 
-const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, productName, quantity, unit, deliveryAddress, buyerPhone }) => {
+const EscrowCheckout = ({ orderId, amount, productName }) => {
     const [loading, setLoading] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
     const [error, setError] = useState(null);
@@ -86,63 +87,64 @@ const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, product
         setError(null);
         setLoading(true);
 
+        if (!orderId || !import.meta.env.VITE_RAZORPAY_KEY_ID) {
+            setError('Payment configuration or approved order is missing.');
+            setLoading(false);
+            return;
+        }
         const sdkLoaded = await loadRazorpay();
         if (!sdkLoaded) {
             setError('Could not load payment gateway. Please check your internet connection.');
             setLoading(false);
+            return;
         }
 
         try {
-            // Step 1: Create backend order
-            const res = await fetch('http://localhost:5001/api/escrow/create-order', {
+            // Step 1: Create backend order (authenticated; backend validates
+            // the amount against the product price)
+            const order = await escrowFetch('/create-order', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    buyer_id: buyerId,
-                    seller_id: sellerId,
-                    amount: amount,
-                    product_id: productId,
-                    quantity: quantity,
-                    unit: unit,
-                    delivery_address: deliveryAddress,
-                    buyer_phone: buyerPhone,
-                    order_id: orderId
-                })
+                body: { order_id: orderId }
             });
 
-            const order = await res.json();
+            if (order.alreadyPaid) {
+                setShowSuccess(true);
+                setLoading(false);
+                return;
+            }
             if (!order.razorpay_order_id) throw new Error(order.error || 'Order creation failed');
 
             // Step 2: Open Razorpay
             const options = {
-                key: 'rzp_test_SY1ec4urEYvzo8',
+                key: import.meta.env.VITE_RAZORPAY_KEY_ID,
                 amount: order.amount,
                 currency: 'INR',
                 name: 'AgroConnect',
                 description: `Secure payment for ${productName || 'Farm Product'}`,
-                image: 'https://ibelaipphuggkncovptw.supabase.co/storage/v1/object/public/logos/agroconnect-logo.png',
                 order_id: order.razorpay_order_id,
-                prefill: { name: 'Buyer', email: 'buyer@agroconnect.in', contact: '9999999999' },
+                prefill: {},
                 theme: { color: '#16a34a' },
-                modal: { escape: false },
+                modal: { escape: false, ondismiss: () => setLoading(false) },
                 handler: async (response) => {
                     // Step 3: Verify & hold payment
-                    const verify = await fetch('http://localhost:5001/api/escrow/verify-payment', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            razorpay_order_id: response.razorpay_order_id,
-                            razorpay_payment_id: response.razorpay_payment_id,
-                            razorpay_signature: response.razorpay_signature,
-                            order_id: order.order_id
-                        })
-                    });
+                    try {
+                        const verifyData = await escrowFetch('/verify-payment', {
+                            method: 'POST',
+                            body: {
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                                order_id: order.order_id
+                            }
+                        });
 
-                    const verifyData = await verify.json();
-                    if (verifyData.success) {
-                        setShowSuccess(true); // ✅ Show success popup
-                    } else {
-                        setError('Payment verification failed. Please contact support.');
+                        if (verifyData.success) {
+                            setShowSuccess(true); // ✅ Show success popup
+                        } else {
+                            setError('Payment verification failed. Please contact support.');
+                        }
+                    } catch (verifyErr) {
+                        setError(verifyErr.message || 'Payment verification failed. Please contact support.');
                     }
                     setLoading(false);
                 }
@@ -221,7 +223,7 @@ const EscrowCheckout = ({ orderId, productId, buyerId, sellerId, amount, product
                 </button>
 
                 <p className="text-center text-xs text-slate-400 mt-4">
-                    Your payment is held safely until delivery is confirmed
+                    Payment verification is handled securely by the backend.
                 </p>
             </div>
         </>

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # npm ci (not install) for reproducible lockfile builds; --ignore-scripts
+      # blocks install-script supply-chain attacks (Sonar S6505/S8543).
+      # Verified locally: both the frontend build and the backend tests pass
+      # with --ignore-scripts (no postinstall/preinstall scripts exist).
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm ci --ignore-scripts
+        working-directory: backend
+      - run: npm test -- --runInBand
+        working-directory: backend
