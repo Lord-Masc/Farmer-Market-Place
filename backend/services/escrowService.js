@@ -152,9 +152,14 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
     } catch (_) {
         throw new AppError(400, 'PAYMENT_NOT_FOUND', 'The payment could not be verified with the gateway.');
     }
-    if (!payment || payment.status !== 'captured' || payment.order_id !== razorpay_order_id ||
-        Number(payment.amount) !== Math.round(Number(order.total_price) * 100)) {
-        throw new AppError(400, 'PAYMENT_NOT_VALID', 'The captured payment does not match this order.');
+    if (!payment || payment.status !== 'captured') {
+        throw new AppError(400, 'PAYMENT_NOT_CAPTURED', 'The payment is not captured.');
+    }
+    if (payment.order_id !== razorpay_order_id) {
+        throw new AppError(400, 'PAYMENT_ORDER_MISMATCH', 'The payment does not belong to this checkout.');
+    }
+    if (Number(payment.amount) !== Math.round(Number(order.total_price) * 100)) {
+        throw new AppError(400, 'AMOUNT_MISMATCH', 'The paid amount does not match the order total.');
     }
 
     const { data: existing, error: readError } = await supabase.from('payments')
@@ -217,6 +222,7 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
         if (error) {
             if (/ORDER_NOT_ACCESSIBLE/.test(error.message)) throw notAccessible();
             if (/INSUFFICIENT_STOCK/.test(error.message)) throw new AppError(409, 'INSUFFICIENT_STOCK', 'Insufficient stock for this order.');
+            if (/INVALID_QUANTITY/.test(error.message)) throw new AppError(400, 'INVALID_QUANTITY', 'Quantity must be a positive number.');
             if (/INVALID_TRANSITION/.test(error.message)) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
             throw error;
         }
