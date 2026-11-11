@@ -259,16 +259,10 @@ const FarmerDashboard = () => {
         const productsMap = {};
         if (products) products.forEach(p => productsMap[p.id] = p);
 
-        // Fetch buyers manually
-        const buyerIds = [...new Set(rawOrders.map(o => o.buyer_id).filter(Boolean))];
-        const { data: buyers } = await supabase.from('profiles').select('id, first_name, last_name, phone_number, phone').in('id', buyerIds);
-        const buyersMap = {};
-        if (buyers) buyers.forEach(b => buyersMap[b.id] = b);
-
         const mergedOrders = rawOrders.map(o => ({
             ...o,
             product: productsMap[o.product_id] || {},
-            buyer: buyersMap[o.buyer_id] || {}
+            buyer: { first_name: o.buyer_name || 'Buyer' }
         }));
 
         setOrders(mergedOrders || []);
@@ -662,10 +656,10 @@ const FarmerDashboard = () => {
                                     </td>
                                     <td className="p-6">
                                         <div className="flex flex-col gap-1">
-                                            <p className="text-sm font-bold text-green-deep uppercase tracking-tighter">👤 {order.buyer?.first_name} {order.buyer?.last_name || ''}</p>
+                                            <p className="text-sm font-bold text-green-deep uppercase tracking-tighter">👤 {order.buyer_name || 'Buyer'}</p>
                                             <div className="flex flex-col">
                                                 <p className="text-[10px] text-gray-400 font-bold uppercase">🏠 TO: {order.delivery_address || 'Profile Location'}</p>
-                                                <p className="text-[10px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.buyer_phone || order.buyer?.phone_number || order.buyer?.phone || 'No Phone'}</p>
+                                                <p className="text-[10px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.buyer_phone || 'No Phone'}</p>
                                             </div>
                                         </div>
                                     </td>
