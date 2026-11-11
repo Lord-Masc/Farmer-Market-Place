@@ -716,7 +716,7 @@ const FarmerDashboard = () => {
                                             )}
                                             {order.status === 'PAID' && (
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1 opacity-90 animate-pulse">
-                                                    <span>📦</span> Payment Held. Dispatch Now!
+                                                    <span>📦</span> Payment Verified. Dispatch Now!
                                                 </span>
                                             )}
                                             {(order.status === 'delivered' || order.status === 'COMPLETED') && (
@@ -972,7 +972,7 @@ const FarmerDashboard = () => {
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-cream-dark">
                 <h2 className="font-playfair text-2xl font-black text-green-deep">Income Tracker 💸</h2>
-                <p className="text-gray-400 text-sm font-bold">Track your payments being held in the secure Agro-Vault.</p>
+                <p className="text-gray-400 text-sm font-bold">Track verified payments and completed orders.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-6">
@@ -1011,7 +1011,7 @@ const FarmerDashboard = () => {
                                                 {(order.status === 'COMPLETED' || order.status === 'delivered') ? '✅' : '🛡️'}
                                             </div>
                                             <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber animate-pulse'}`}>
-                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Escrow Released' : 'Held in Vault'}
+                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Order Completed' : 'Payment Verified'}
                                             </p>
                                         </div>
 
@@ -1028,7 +1028,7 @@ const FarmerDashboard = () => {
                                         {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
                                     </p>
                                     {order.status !== 'COMPLETED' && order.status !== 'delivered' && (
-                                        <p className="text-[9px] text-gray-400 italic mt-2">Will be released once buyer confirms delivery.</p>
+                                        <p className="text-[9px] text-gray-400 italic mt-2">Automatic farmer payouts are not configured yet.</p>
                                     )}
                                 </div>
                             </div>
@@ -1299,7 +1299,7 @@ const FarmerDashboard = () => {
                   <div>
                       <h4 className="text-md font-black text-green-deep mb-1">Buyer has Paid! ✨</h4>
                       <p className="text-xs text-gray-500 font-bold leading-relaxed">
-                          A payment of <span className="text-green-fresh">₹{escrowNotification.amount}</span> for Order #{escrowNotification.orderId.slice(0,6)} is now **Held in Escrow**.
+                          A payment of <span className="text-green-fresh">₹{escrowNotification.amount}</span> for Order #{escrowNotification.orderId.slice(0,6)} has been verified by Razorpay.
                       </p>
                       <button 
                          onClick={() => { setActiveTab('Payment Track'); setEscrowNotification({ show: false, orderId: null, amount: 0 }); }}
