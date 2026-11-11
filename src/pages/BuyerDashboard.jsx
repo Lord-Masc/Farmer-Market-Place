@@ -1379,7 +1379,7 @@ const BuyerDashboard = () => {
                           onClick={() => handleConfirmDelivery(confirmModal.orderId)}
                           className="flex-2 bg-green-deep text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-green-deep/20 hover:scale-105 active:scale-95 transition-all"
                       >
-                          Yes, Release Now →
+                          Confirm Delivery →
                       </button>
                   </div>
               </div>
