@@ -4,7 +4,7 @@ const { AppError, notAccessible } = require('../utils/errors');
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+    process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // Validate Razorpay credentials
@@ -146,7 +146,7 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
         throw new AppError(409, 'PAYMENT_ALREADY_USED', 'This payment has already been used for another order.');
     }
 
-    // Mark PAID, gated on still being CREATED (a concurrent verify loses).
+    // Mark PAID, gated on still being confirmed (a concurrent verify loses).
     // Backfill the delivery deadline if it was never set, so the auto-refund
     // can never miss this order.
     const updates = { status: 'PAID' };
@@ -158,7 +158,7 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
     if (orderError) throw orderError;
     const updatedOrder = getSingle(updatedData);
     if (!updatedOrder) {
-        throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only an unpaid order can be paid.');
+        throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only a farmer-approved order can be paid.');
     }
 
     const { error: payErr } = await supabase.from('payments').insert({
@@ -214,7 +214,7 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
     return updated;
 };
 
-// 3. Mark Order as Shipped — farmer-only, and only from PAID or confirmed.
+// 3. Mark Order as Shipped — farmer-only, and only after payment.
 exports.markOrderAsShipped = async (order_id, farmer_id) => {
     const order = await fetchOrder(order_id);
     if (order.farmer_id !== farmer_id) throw notAccessible();
