@@ -73,6 +73,12 @@ const SignUp = () => {
         },
       });
 
+      if (!signUpError && data?.user?.identities?.length === 0) {
+        setError('Could not create an account with these details. If you already have an account, please log in.');
+        setLoading(false);
+        return;
+      }
+
       if (signUpError) {
         if (signUpError.message.includes('already registered')) {
           // Generic message: do not confirm whether the email exists.
