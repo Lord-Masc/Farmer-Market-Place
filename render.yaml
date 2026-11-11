@@ -1,5 +1,7 @@
 # Farmer Marketplace — escrow backend on Render (Blueprint).
-# Frontend domains are allowlisted in backend/middleware/security.js; no FRONTEND_URL needed.
+# Frontend domains are allowlisted in backend/middleware/security.js; extra
+# origins (e.g. Vercel preview deployments) come from ALLOWED_ORIGINS, set
+# in the Render dashboard as exact origins — never a wildcard.
 # Secrets below are placeholders (sync: false) — set real values in the
 # Render dashboard, never in this file.
 services:
@@ -24,4 +26,8 @@ services:
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET
+        sync: false
+      # CORS extras: exact Vercel preview origins (comma-separated). The
+      # production + localhost origins are hardcoded in security.js.
+      - key: ALLOWED_ORIGINS
         sync: false

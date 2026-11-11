@@ -26,10 +26,12 @@
 ├── supabase/migrations/ # THE database source of truth — apply in order on a fresh project:
 │   ├── 20261108_base_schema.sql        # tables: profiles, products, orders, payments…
 │   ├── 20261108_create_refunds.sql     # refunds ledger + claim_pending_refunds()
+│   ├── 20261109_profile_signup_trigger.sql # create profile on Auth signup (never blocks signup)
 │   ├── 20261109_security_hardening.sql # RLS policies, retry columns, CHECKs
 │   ├── 20261111_transaction_hardening.sql # atomic stock reservation + retry scheduling
 │   ├── 20261112_profile_privacy.sql # private profiles + public farmer directory + signup trigger
-│   └── 20261113_payment_binding.sql # bind Razorpay order IDs to internal orders
+│   ├── 20261113_payment_binding.sql # bind Razorpay order IDs to internal orders
+│   └── 20261114_orders_farmer_update_policy.sql # close direct-PostgREST farmer status bypass
 ├── render.yaml           # Render Blueprint: how the backend deploys (rootDir backend)
 ├── docs/                 # Runbooks + the refund before/after report + screenshots
 ├── scripts/              # refund-concurrency-test.js — the live before/after test
@@ -57,7 +59,7 @@ Backend and database:
 - Payment REST endpoints — `backend/routes/orderRoutes.js` + `backend/controllers/escrowController.js`: `POST /create-order`, `/verify-payment`, `/update-status`, `/ship-order`, `/confirm-delivery`, `/refund`
 - Payment service logic — `backend/services/escrowService.js`: server-side amount checks, payment verification, order transitions and idempotent refunds
 - Auto-refund cron — `backend/server.js` + `backend/services/escrowService.js`: `node-cron` schedule (`0 * * * *`, hourly) that auto-refunds expired/unconfirmed orders
-- Database + security — `supabase/migrations/`: base schema (`20261108_base_schema.sql`), refunds ledger (`20261108_create_refunds.sql`), hardening (`20261109_security_hardening.sql`, `20261111_transaction_hardening.sql`, `20261112_profile_privacy.sql`, `20261113_payment_binding.sql`)
+- Database + security — `supabase/migrations/`: base schema (`20261108_base_schema.sql`), refunds ledger (`20261108_create_refunds.sql`), signup trigger (`20261109_profile_signup_trigger.sql`), hardening (`20261109_security_hardening.sql`, `20261111_transaction_hardening.sql`, `20261112_profile_privacy.sql`, `20261113_payment_binding.sql`, `20261114_orders_farmer_update_policy.sql`)
 
 ## API Endpoints
 
@@ -85,13 +87,13 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 ## Setup
 1. `git clone` the repo and run `npm install` (root and `backend/` each have their own `package.json` where applicable)
 2. Copy each `.env.example` to `.env` and add your own keys — root `.env.example` (frontend), `backend/.env.example`. Never commit a real `.env`.
-3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql`, `20261108_create_refunds.sql`, `20261109_security_hardening.sql`, then `20261111_transaction_hardening.sql` (atomic stock reservation + retry scheduling), then `20261112_profile_privacy.sql` (private profiles + farmer directory + signup trigger), then `20261113_payment_binding.sql` (Razorpay order binding).
+3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql`, `20261108_create_refunds.sql`, `20261109_profile_signup_trigger.sql`, `20261109_security_hardening.sql`, then `20261111_transaction_hardening.sql` (atomic stock reservation + retry scheduling), then `20261112_profile_privacy.sql` (private profiles + farmer directory + signup trigger), then `20261113_payment_binding.sql` (Razorpay order binding), then `20261114_orders_farmer_update_policy.sql` (close direct-PostgREST farmer status bypass).
 4. Run the frontend with `npm run dev`; run the escrow backend with `npm run dev` in `backend/` (port 5001).
 
 ## Deployment
 - **Frontend — Vercel:** deploys from this repo. Set `VITE_ESCROW_API_URL` to the Render backend URL (see below), plus `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_RAZORPAY_KEY_ID`, `VITE_GOOGLE_MAPS_API_KEY`.
 - **Escrow backend — Render:** live at https://farmer-escrow-backend.onrender.com. `render.yaml` (Blueprint) defines the web service — `rootDir: backend`, build `npm install`, start `node server.js`, health check `/health`. Node is a bounded range (`NODE_VERSION: ">=22 <25"`), not an exact pin. Set these in the Render dashboard (never in the repo): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`.
-- **Database — Supabase (new project):** create a fresh project, apply all six migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
+- **Database — Supabase (new project):** create a fresh project, apply all eight migrations in order (see Setup step 3), and use its URL/keys in the Vercel and Render env vars above. The old project's keys are not used anywhere in this repo.
 
 ## Screenshots
 ![Homepage — hero and marketplace](docs/screenshots/homepage.png)
@@ -102,13 +104,3 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 ## Payment and payout limitation
 
 The app verifies Razorpay payments and records internal payment states. A database status such as `HELD` or `RELEASED` does **not** place funds in a legal escrow account or trigger a farmer payout. Automatic split settlements require a separately configured Razorpay Route/linked-account setup and merchant approval. Until that integration exists, the UI describes payment verification and order completion rather than claiming funds were released to a farmer.
-
-## AI-assisted development workflow
-
-This repository includes a project-specific AI collaboration guide:
-- Start with [AGENTS.md](AGENTS.md) before asking an AI coding agent to change code.
-- Read [docs/ai/README.md](docs/ai/README.md) for the required documentation workflow.
-- Keep handover, decisions, architecture, execution flow, bug/feature traces, constraints, test evidence, and rollback plans current.
-- Require a plan before implementation, one logical change per request, and a complete diff review before accepting changes.
-- Never merge, deploy, or apply production migrations without explicit approval.
-
