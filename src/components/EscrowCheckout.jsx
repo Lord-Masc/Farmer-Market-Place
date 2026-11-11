@@ -107,6 +107,11 @@ const EscrowCheckout = ({ orderId, amount, productName }) => {
                 body: { order_id: orderId }
             });
 
+            if (order.alreadyPaid) {
+                setShowSuccess(true);
+                setLoading(false);
+                return;
+            }
             if (!order.razorpay_order_id) throw new Error(order.error || 'Order creation failed');
 
             // Step 2: Open Razorpay
