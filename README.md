@@ -41,8 +41,8 @@ Note: there used to be a second backend in `Server/` — it was dead (nothing ca
 
 ## Features
 - Two roles: Farmers (list products, manage inventory) and Buyers (browse, order)
-- Escrow flow: order creation, payment verification, shipping, delivery confirmation, refunds
-- Group buying module
+- Payment flow: farmer-approved orders, Razorpay verification, payment status tracking and refunds
+- Group buying UI prototype
 - Auto-refund processing with Node.js Cron
 - Supabase Auth + PostgreSQL Row Level Security
 
@@ -51,8 +51,8 @@ React.js, Tailwind CSS, Node.js, Express.js, Supabase, PostgreSQL
 
 ## My Contribution
 Backend and database:
-- Escrow REST endpoints — `backend/routes/orderRoutes.js` + `backend/controllers/escrowController.js`: `POST /create-order`, `/verify-payment`, `/update-status`, `/ship-order`, `/confirm-delivery`, `/refund`
-- Escrow service logic — `backend/services/escrowService.js`: payment verification, order status transitions, `refundOrder` (idempotent — see Refund safety)
+- Payment REST endpoints — `backend/routes/orderRoutes.js` + `backend/controllers/escrowController.js`: `POST /create-order`, `/verify-payment`, `/update-status`, `/ship-order`, `/confirm-delivery`, `/refund`
+- Payment service logic — `backend/services/escrowService.js`: server-side amount checks, payment verification, order transitions and idempotent refunds
 - Auto-refund cron — `backend/server.js` + `backend/services/escrowService.js`: `node-cron` schedule (`0 * * * *`, hourly) that auto-refunds expired/unconfirmed orders
 - Database + security — `supabase/migrations/`: base schema (`20261108_base_schema.sql`), refunds ledger (`20261108_create_refunds.sql`), hardening (`20261109_security_hardening.sql`)
 
@@ -77,12 +77,12 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 - Atomic claim: only the caller that flips `REFUND_PENDING` to `REFUND_PROCESSING` proceeds; every other caller gets 0 rows.
 - The gateway refund id is stored; if it already exists for an order, the gateway is never called again.
 - The hourly cron claims a batch with `FOR UPDATE SKIP LOCKED`, so overlapping runs never pick the same order.
-- Gateway failures move the order to `REFUND_FAILED` (never stuck), with retry and exponential backoff.
+- Transient gateway failures return the order to `REFUND_PENDING` with `next_retry_at` exponential backoff; permanent data failures become `REFUND_FAILED`.
 
 ## Setup
 1. `git clone` the repo and run `npm install` (root and `backend/` each have their own `package.json` where applicable)
 2. Copy each `.env.example` to `.env` and add your own keys — root `.env.example` (frontend), `backend/.env.example`. Never commit a real `.env`.
-3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql` (profiles, products, orders, payments, group buys), then `20261108_create_refunds.sql` (refunds ledger + `claim_pending_refunds` function), then `20261109_security_hardening.sql` (refund retry columns, policy replacements, CHECKs).
+3. On a FRESH Supabase project, apply the migrations in `supabase/migrations/` in order in the SQL editor: `20261108_base_schema.sql`, `20261108_create_refunds.sql`, `20261109_security_hardening.sql`, then `20261111_transaction_hardening.sql` (atomic stock reservation + retry scheduling).
 4. Run the frontend with `npm run dev`; run the escrow backend with `npm run dev` in `backend/` (port 5001).
 
 ## Deployment
@@ -94,3 +94,8 @@ also mounted at `/api/orders/*` for legacy dashboard support.
 ![Homepage — hero and marketplace](docs/screenshots/homepage.png)
 ![Fresh Today — product listings](docs/screenshots/marketplace.png)
 ![Farmer and Buyer sections](docs/screenshots/features.png)
+
+
+## Payment and payout limitation
+
+The app verifies Razorpay payments and records internal payment states. A database status such as `HELD` or `RELEASED` does **not** place funds in a legal escrow account or trigger a farmer payout. Automatic split settlements require a separately configured Razorpay Route/linked-account setup and merchant approval. Until that integration exists, the UI describes payment verification and order completion rather than claiming funds were released to a farmer.
