@@ -27,7 +27,7 @@ const Checkout = () => {
         const load = async () => {
             try {
                 const { data: profile } = await supabase.from('profiles')
-                    .select('address,phone_number,phone').eq('id', user.id).single();
+                    .select('address,phone_number,phone,first_name,last_name').eq('id', user.id).single();
                 setAddress(profile?.address || '');
                 setBuyerName([profile?.first_name, profile?.last_name].filter(Boolean).join(' '));
                 setPhone(profile?.phone_number || profile?.phone || '');
