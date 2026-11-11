@@ -1,7 +1,43 @@
-# Farmer Marketplace
+<div align="center">
+
+# 🌾 AgroConnect — Farmer Marketplace
+
+[![Typing SVG](https://readme-typing-svg.demolab.com?font=Fira+Code&size=22&pause=1000&color=16A34A&center=true&vCenter=true&width=650&lines=Farmers+list.+Buyers+order.;Razorpay-verified+payments.;Supabase+Auth+%2B+Row+Level+Security.;Atomic+stock+reservation%2C+idempotent+refunds.)](https://github.com/r1shabhsharma05/Farmer-Market-Place)
+
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-000000?logo=vercel&logoColor=white)](https://farmer-market-place-six.vercel.app)
+[![Backend](https://img.shields.io/badge/Backend-Render-46E3B7?logo=render&logoColor=black)](https://farmer-escrow-backend.onrender.com)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)](https://vite.dev)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Node.js](https://img.shields.io/badge/Node.js-22-5FA04E?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)](https://expressjs.com)
+[![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=black)](https://supabase.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![Razorpay](https://img.shields.io/badge/Razorpay-02042B?logo=razorpay&logoColor=white)](https://razorpay.com)
+[![Jest](https://img.shields.io/badge/Tests-42%20passing-C21325?logo=jest&logoColor=white)](backend/tests)
+
+</div>
+
+## About
+
+**AgroConnect** is a 2-sided agri marketplace connecting farmers and buyers, with Razorpay payment tracking and an escrow-style order flow.
+
+The problem it solves: a farmer lists produce, a buyer orders it — but who makes sure the money and the goods both move correctly? AgroConnect puts a verified flow in between: the farmer approves the order, stock is reserved atomically (so two buyers can never buy the same last kilo), the buyer pays through Razorpay, the payment is verified server-side, and delivery confirmation moves the order to completed. If an order expires unconfirmed, an hourly job refunds it automatically — exactly once.
+
+- 👨‍🌾 **Farmers** — list products, manage inventory, approve orders, ship and confirm deliveries.
+- 🛒 **Buyers** — browse products, place orders, pay securely, track order status.
+- 🔒 **Trust built in** — Supabase Auth + PostgreSQL Row Level Security, server-side amount checks, constant-time payment-signature verification, and idempotent refunds (50 parallel refund requests still produce exactly one refund).
+
+## 🔴 Live Demo
+
+| | Link |
+|---|---|
+| **App (frontend)** | https://farmer-market-place-six.vercel.app |
+| **Escrow API (backend)** | https://farmer-escrow-backend.onrender.com |
+
+> The backend runs on Render Free — it sleeps after inactivity, so the first request after a while can take ~50 seconds to wake up. The old `farmer-market-place-mu.vercel.app` deployment is retired (it pointed at a deleted Supabase project) — please use the link above.
 
 2-sided agri marketplace connecting farmers and buyers with Razorpay payment tracking.
-**Live:** https://farmer-market-place-six.vercel.app
 
 ## Project structure
 
@@ -21,7 +57,7 @@
 │   ├── controllers/      # escrowController.js — request in, response out
 │   ├── services/         # escrowService.js — the real work: Razorpay, stock, refunds
 │   ├── middleware/       # requireAuth (Supabase JWT) + security (CORS, headers, rate limit)
-│   ├── tests/            # Jest tests (refund idempotency, escrow security)
+│   ├── tests/            # Jest tests — 42 tests across 5 suites (refund idempotency, escrow security, order completion)
 │   └── utils/            # Shared errors
 ├── supabase/migrations/ # THE database source of truth — apply in order on a fresh project:
 │   ├── 20261108_base_schema.sql        # tables: profiles, products, orders, payments…
