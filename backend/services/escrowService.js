@@ -90,22 +90,30 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
         throw new AppError(409, 'AMOUNT_MISMATCH', 'The product price changed. Please contact the farmer and place a new order.');
     }
 
+    let razorpayOrder;
     try {
-        const razorpayOrder = await retryAsync(() => razorpay.orders.create({
-            amount: Math.round(expected * 100),
-            currency: 'INR',
-            receipt: `order_${String(order.id).replace(/-/g, '').slice(0, 20)}`,
-        }), 3, 1000);
-        const { data: saved, error: saveError } = await supabase.from('orders')
-            .update({ razorpay_order_id: razorpayOrder.id })
-            .eq('id', order.id).eq('status', 'confirmed').select('id');
-        if (saveError) throw saveError;
-        if (!saved?.length) throw new AppError(409, 'ORDER_NOT_PAYABLE', 'This order is no longer awaiting payment.');
-        return { order_id: order.id, razorpay_order_id: razorpayOrder.id, amount: Math.round(expected * 100) };
+        razorpayOrder = order.razorpay_order_id
+            ? await razorpay.orders.fetch(order.razorpay_order_id)
+            : await retryAsync(() => razorpay.orders.create({
+                amount: Math.round(expected * 100),
+                currency: 'INR',
+                receipt: `order_${String(order.id).replace(/-/g, '').slice(0, 20)}`,
+            }), 3, 1000);
     } catch (err) {
-        console.error('Razorpay order creation failed:', err.message);
+        console.error('Razorpay order request failed:', err.message);
         throw new AppError(503, 'PAYMENT_GATEWAY_UNAVAILABLE', 'Payment gateway is temporarily unavailable. Please try again.');
     }
+    if (Number(razorpayOrder.amount) !== Math.round(expected * 100) || !['created', 'attempted'].includes(razorpayOrder.status)) {
+        throw new AppError(409, 'PAYMENT_ALREADY_SUBMITTED', 'This payment attempt has already been submitted. Refresh your orders or contact support.');
+    }
+    if (!order.razorpay_order_id) {
+        const { data: saved, error: saveError } = await supabase.from('orders')
+            .update({ razorpay_order_id: razorpayOrder.id })
+            .eq('id', order.id).eq('status', 'confirmed').is('razorpay_order_id', null).select('id');
+        if (saveError) throw saveError;
+        if (!saved?.length) throw new AppError(409, 'PAYMENT_ORDER_CONFLICT', 'A payment attempt is already being created. Please refresh and try again.');
+    }
+    return { order_id: order.id, razorpay_order_id: razorpayOrder.id, amount: Math.round(expected * 100) };
 };
 
 // 2. Verify a Razorpay payment server-side and mark the order PAID.
