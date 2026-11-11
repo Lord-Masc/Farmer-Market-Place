@@ -24,14 +24,19 @@ const razorpay = new Razorpay({
 // Helper: Handle supabase .single() safely
 const getSingle = (data) => (data && data.length > 0 ? data[0] : null);
 
-// Helper: Retry logic for API calls (exponential backoff — delay doubles each attempt)
+// Helper: Retry logic for API calls (exponential backoff — delay doubles each attempt).
+// Only transient failures are retried: network errors (no statusCode) and
+// 5xx gateway failures. A 4xx means the request itself is wrong — retrying
+// after an ambiguous timeout could create a second gateway order while the
+// first already exists (orphan). (Audit L2.)
 const retryAsync = async (fn, retries = 3, delay = 1000) => {
     let currentDelay = delay;
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
         } catch (err) {
-            if (i === retries - 1) throw err;
+            const transient = !err.statusCode || err.statusCode >= 500;
+            if (!transient || i === retries - 1) throw err;
             console.warn(`Attempt ${i + 1} failed, retrying in ${currentDelay}ms...`);
             await new Promise(r => setTimeout(r, currentDelay));
             currentDelay *= 2;
@@ -289,10 +294,19 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
         .eq('order_id', order_id)
         .eq('status', 'HELD')
         .select('*');
-    if (paymentError) throw paymentError;
+    if (paymentError) {
+        // The order is already COMPLETED — roll it back, otherwise the
+        // payment stays HELD forever with no reconciler (audit H2).
+        const { error: rollbackError } = await supabase.from('orders')
+            .update({ status: prevStatus }).eq('id', order_id);
+        if (rollbackError) console.error('Failed to roll back order after payment-release error:', rollbackError.message);
+        throw paymentError;
+    }
     if (!payData || payData.length === 0) {
         // No HELD payment to release — roll the order back and refuse.
-        await supabase.from('orders').update({ status: prevStatus }).eq('id', order_id);
+        const { error: rollbackError } = await supabase.from('orders')
+            .update({ status: prevStatus }).eq('id', order_id);
+        if (rollbackError) console.error('Failed to roll back order after unreleasable payment:', rollbackError.message);
         throw new AppError(409, 'ORDER_NOT_RELEASABLE', 'Only a paid or shipped order can be completed.');
     }
 
@@ -337,8 +351,12 @@ exports.markRefundPending = async (order_id, opts = {}) => {
 // tolerates a missing payment row (legacy data): the money is refunded and
 // the ledger has it, so a missing row is logged, not fatal.
 async function completeRefundStatuses(order_id, gatewayRefundId, message) {
+    // Status-gated: only an order this caller claimed (REFUND_PROCESSING)
+    // or the reconciler owns (REFUND_RECONCILE) may flip to REFUNDED, so
+    // completion stays atomic with the claim (audit L5).
     const { data: orderRows, error: orderErr } = await supabase
-        .from('orders').update({ status: 'REFUNDED' }).eq('id', order_id).select('*');
+        .from('orders').update({ status: 'REFUNDED' }).eq('id', order_id)
+        .in('status', ['REFUND_PROCESSING', 'REFUND_RECONCILE']).select('*');
     if (orderErr) {
         throw Object.assign(new Error('Refund Failed: ' + orderErr.message), { postGateway: true, gateway_refund_id: gatewayRefundId });
     }
@@ -451,7 +469,9 @@ async function processClaimedRefund(order) {
             });
             if (pendErr) {
                 // A concurrent insert won the UNIQUE(order_id) race — re-read.
-                if (String(pendErr.message || '').includes('duplicate key')) {
+                // Prefer the stable Postgres code 23505; keep the message
+                // check as a fallback for clients that do not surface it.
+                if (pendErr.code === '23505' || String(pendErr.message || '').includes('duplicate key')) {
                     const { data: dup, error: dupErr } = await supabase
                         .from('refunds').select('*').eq('order_id', order_id);
                     if (dupErr) throw dupErr;
@@ -651,13 +671,19 @@ exports.autoRefundJob = async () => {
             // order (REFUND_PENDING -> REFUND_PROCESSING), so only one caller
             // per order proceeds to the gateway.
             console.warn('claim_pending_refunds RPC unavailable, falling back to per-order claim:', rpcError.message);
+            // Filter + order in the query: selecting the first 50 rows and
+            // filtering in JS starves due refunds when the first 50 are all
+            // future-retry (audit L3).
+            const now = new Date().toISOString();
             const { data: pending, error: pendingError } = await supabase
                 .from('orders')
                 .select('id, next_retry_at')
                 .eq('status', 'REFUND_PENDING')
+                .or(`next_retry_at.is.null,next_retry_at.lte.${now}`)
+                .order('created_at', { ascending: true })
                 .limit(50);
             if (pendingError) throw pendingError;
-            claimed = (pending || []).filter(row => !row.next_retry_at || Date.parse(row.next_retry_at) <= Date.now());
+            claimed = pending || [];
         } else {
             claimed = rpcData || [];
             claimedViaRpc = true;
