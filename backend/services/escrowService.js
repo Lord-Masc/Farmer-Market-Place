@@ -64,181 +64,42 @@ async function fetchOrder(order_id) {
     return order;
 }
 
-// Atomic stock decrement: optimistic conditional update — the write only
-// succeeds if the quantity is still the value just read, so two concurrent
-// confirms cannot both decrement from the same stock (lost update). Retries
-// the read on contention (bounded).
-async function decrementStockAtomic(productId, orderQty, maxAttempts = 3) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const { data: prodData, error: readErr } = await supabase
-            .from('products').select('quantity').eq('id', productId);
-        if (readErr) throw readErr;
-        const product = getSingle(prodData);
-        if (!product) throw notAccessible();
-        const currentStock = Number(product.quantity || 0);
-        if (currentStock < orderQty) {
-            throw new AppError(400, 'INSUFFICIENT_STOCK', 'Insufficient stock for this order.');
-        }
-        const { data: updated, error: updErr } = await supabase
-            .from('products')
-            .update({ quantity: currentStock - orderQty })
-            .eq('id', productId)
-            .eq('quantity', currentStock)
-            .select('*');
-        if (updErr) throw updErr;
-        if (updated && updated.length > 0) return currentStock - orderQty;
-        // 0 rows: another writer changed the stock — re-read and retry.
-        if (attempt === maxAttempts) {
-            throw new AppError(409, 'STOCK_CONFLICT', 'Stock changed while confirming. Please try again.');
-        }
-    }
-}
-
 // 1. Create Razorpay Order.
 // Price binding: the charge must equal the product's listed price x quantity.
 // The product row is the source of truth — a forged client-side amount (or a
 // forged seller) can never reach Razorpay. The stored total_price is always
 // the server-validated amount, so a forged direct-insert total is corrected
 // here before any money moves.
-exports.createRazorpayOrder = async (buyer_id, seller_id, amount, product_id, quantity, unit, delivery_address, buyer_phone, existing_order_id = null) => {
+exports.createRazorpayOrder = async (buyerId, orderId) => {
+    if (!orderId) throw new AppError(400, 'MISSING_ORDER', 'An approved order is required.');
+    const order = await fetchOrder(orderId);
+    if (order.buyer_id !== buyerId) throw new AppError(403, 'FORBIDDEN', 'You can only pay for your own orders.');
+    if (order.status !== 'confirmed') throw new AppError(409, 'ORDER_NOT_PAYABLE', 'The farmer must approve this order before payment.');
+
+    const { data, error } = await supabase.from('products')
+        .select('farmer_id,user_price,price').eq('id', order.product_id);
+    if (error) throw error;
+    const product = getSingle(data);
+    if (!product || product.farmer_id !== order.farmer_id) throw notAccessible();
+
+    const quantity = validateQuantity(order.quantity);
+    const multiplier = order.unit_at_order === 'quintal' ? 100 : 1;
+    const expected = Number(product.user_price ?? product.price) * quantity * multiplier;
+    if (!Number.isFinite(expected) || expected <= 0 ||
+        Math.round(expected * 100) !== Math.round(Number(order.total_price) * 100)) {
+        throw new AppError(409, 'AMOUNT_MISMATCH', 'The product price changed. Please contact the farmer and place a new order.');
+    }
+
     try {
-        const amountNum = Number(amount);
-        if (!Number.isFinite(amountNum) || amountNum <= 0) {
-            throw new AppError(400, 'INVALID_AMOUNT', 'Invalid amount provided.');
-        }
-
-        // Existing-order branch: validate the order BEFORE creating a Razorpay
-        // order, so a rejected call creates nothing. Only the order's buyer,
-        // only while the order is still CREATED (unpaid).
-        let existing = null;
-        if (existing_order_id) {
-            existing = await fetchOrder(existing_order_id);
-            if (existing.buyer_id !== buyer_id) {
-                throw new AppError(403, 'FORBIDDEN', 'You can only modify your own orders.');
-            }
-            if (existing.status !== 'CREATED') {
-                throw new AppError(409, 'ORDER_NOT_EDITABLE', 'Only an unpaid order can be updated.');
-            }
-        }
-
-        // Product lookup + price binding. product_id is required: without a
-        // product there is nothing to bind the amount against.
-        const effectiveProductId = product_id || (existing && existing.product_id);
-        if (!effectiveProductId) {
-            throw new AppError(400, 'INVALID_PRODUCT', 'A product is required to create an order.');
-        }
-        const { data: prodData, error: prodErr } = await supabase
-            .from('products').select('*').eq('id', effectiveProductId);
-        if (prodErr) throw prodErr;
-        const product = getSingle(prodData);
-        if (!product) throw notAccessible();
-        if (product.farmer_id !== seller_id) {
-            throw new AppError(400, 'INVALID_SELLER', 'The seller does not match this product.');
-        }
-        const unitPrice = Number(product.user_price ?? product.price);
-        if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-            throw new AppError(400, 'INVALID_PRODUCT_PRICE', 'This product has no valid price.');
-        }
-        // The authoritative quantity is the stored one for an existing order,
-        // the caller's (validated) quantity for a new order.
-        const qty = existing ? validateQuantity(existing.quantity) : validateQuantity(quantity);
-        if (existing && quantity !== undefined && quantity !== null && Number(quantity) !== qty) {
-            throw new AppError(400, 'AMOUNT_MISMATCH', 'The quantity does not match the order.');
-        }
-        const expectedAmount = unitPrice * qty;
-        if (Math.round(expectedAmount * 100) !== Math.round(amountNum * 100)) {
-            throw new AppError(400, 'AMOUNT_MISMATCH', 'The amount does not match the product price.');
-        }
-
-        const options = {
-            amount: Math.round(amountNum * 100), // paise
-            currency: "INR",
-            receipt: `receipt_${String(buyer_id).slice(0, 8)}_${Date.now()}`
-        };
-
-        console.log('📝 Creating Razorpay order with options:', options);
-
-        let order;
-        try {
-            // Retry Razorpay order creation with exponential backoff
-            order = await retryAsync(
-                () => razorpay.orders.create(options),
-                3,
-                1500
-            );
-            console.log('✅ Razorpay order created successfully:', order.id);
-        } catch (razorpayErr) {
-            console.error('⚠️ Razorpay API failed:', razorpayErr.message);
-            console.warn('FALLBACK: Using test order ID for development');
-
-            // Fallback for development/testing
-            order = {
-                id: `order_test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                entity: 'order',
-                amount: options.amount,
-                amount_paid: 0,
-                amount_due: options.amount,
-                currency: options.currency,
-                receipt: options.receipt,
-                created_at: Math.floor(Date.now() / 1000)
-            };
-            console.log('📋 Using fallback test order:', order.id);
-        }
-
-        const deadline = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
-        let data, error;
-        if (existing) {
-            // Existing-order branch: address/phone corrections ONLY. The
-            // delivery deadline is set once at creation and NEVER reset here
-            // (a reset would let a seller evade the auto-refund forever).
-            // The stored total is corrected to the server-validated amount.
-            ({ data, error } = await supabase
-                .from('orders')
-                .update({
-                    delivery_address: delivery_address || '',
-                    buyer_phone: buyer_phone || '',
-                    total_price: expectedAmount,
-                })
-                .eq('id', existing_order_id)
-                .eq('buyer_id', buyer_id)
-                .eq('status', 'CREATED')
-                .select('*'));
-        } else {
-            ({ data, error } = await supabase
-                .from('orders')
-                .insert({
-                    buyer_id,
-                    farmer_id: seller_id,
-                    product_id: effectiveProductId,
-                    total_price: expectedAmount,
-                    status: 'CREATED',
-                    quantity: qty,
-                    unit_at_order: unit || 'kg',
-                    delivery_address: delivery_address || '',
-                    buyer_phone: buyer_phone || '',
-                    delivery_deadline: deadline,
-                })
-                .select('*'));
-        }
-
-        if (error) throw error;
-        const result = getSingle(data);
-        if (!result) throw new AppError(500, 'ORDER_CREATE_FAILED', 'Order creation failed on database.');
-
-        return {
-            order_id: result.id,
-            razorpay_order_id: order.id,
-            amount: options.amount
-        };
+        const razorpayOrder = await retryAsync(() => razorpay.orders.create({
+            amount: Math.round(expected * 100),
+            currency: 'INR',
+            receipt: `order_${String(order.id).replace(/-/g, '').slice(0, 20)}`,
+        }), 3, 1000);
+        return { order_id: order.id, razorpay_order_id: razorpayOrder.id, amount: Math.round(expected * 100) };
     } catch (err) {
-        if (err instanceof AppError) throw err;
-        console.error('❌ Razorpay Order Error Details:', {
-            message: err.message,
-            code: err.code,
-            statusCode: err.statusCode,
-            stack: err.stack
-        });
-        throw new AppError(500, 'ORDER_CREATE_FAILED', 'Order creation failed.');
+        console.error('Razorpay order creation failed:', err.message);
+        throw new AppError(503, 'PAYMENT_GATEWAY_UNAVAILABLE', 'Payment gateway is temporarily unavailable. Please try again.');
     }
 };
 
@@ -254,8 +115,8 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
     if (order.buyer_id !== buyer_id) {
         throw new AppError(403, 'FORBIDDEN', 'You can only pay for your own orders.');
     }
-    if (order.status !== 'CREATED') {
-        throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only an unpaid order can be paid.');
+    if (order.status !== 'confirmed') {
+        throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only a farmer-approved order can be paid.');
     }
 
     // The gateway is the source of truth, not the caller-supplied ids.
@@ -293,7 +154,7 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
         updates.delivery_deadline = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
     }
     const { data: updatedData, error: orderError } = await supabase
-        .from('orders').update(updates).eq('id', order_id).eq('status', 'CREATED').select('*');
+        .from('orders').update(updates).eq('id', order_id).eq('status', 'confirmed').select('*');
     if (orderError) throw orderError;
     const updatedOrder = getSingle(updatedData);
     if (!updatedOrder) {
@@ -307,7 +168,10 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
         // Stored so a refund can call the Razorpay gateway (see refunds migration).
         razorpay_payment_id,
     });
-    if (payErr) throw payErr;
+    if (payErr) {
+        await supabase.from('orders').update({ status: 'confirmed' }).eq('id', order_id).eq('status', 'PAID');
+        throw payErr;
+    }
 
     return updatedOrder;
 };
@@ -325,30 +189,29 @@ const ORDER_TRANSITIONS = {
 exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
     const order = await fetchOrder(orderId);
     if (order.farmer_id !== farmerId) throw notAccessible();
-    const allowed = ORDER_TRANSITIONS[order.status] || [];
-    if (!allowed.includes(newStatus)) {
+    if (!(ORDER_TRANSITIONS[order.status] || []).includes(newStatus)) {
         throw new AppError(409, 'INVALID_TRANSITION', 'This status change is not allowed for the order.');
     }
 
-    // Stock: only 'confirmed' decrements, at most once per order (the
-    // transition map above makes a second confirm unreachable), and the
-    // decrement is atomic (conditional update + retry on contention).
-    if (newStatus === 'confirmed' && order.product_id) {
-        const qty = validateQuantity(order.quantity);
-        const orderQty = order.unit_at_order === 'quintal' ? qty * 100 : qty;
-        await decrementStockAtomic(order.product_id, orderQty);
+    if (newStatus === 'confirmed') {
+        const { data, error } = await supabase.rpc('confirm_order_and_reserve_stock', {
+            p_order_id: orderId, p_farmer_id: farmerId,
+        });
+        if (error) {
+            if (/ORDER_NOT_ACCESSIBLE/.test(error.message)) throw notAccessible();
+            if (/INSUFFICIENT_STOCK/.test(error.message)) throw new AppError(409, 'INSUFFICIENT_STOCK', 'Insufficient stock for this order.');
+            if (/INVALID_TRANSITION/.test(error.message)) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
+            throw error;
+        }
+        return getSingle(Array.isArray(data) ? data : data ? [data] : null);
     }
 
-    const { data: finalData, error: updateError } = await supabase
-        .from('orders')
-        .update({ status: newStatus })
-        .eq('id', orderId)
-        .select('*');
-
-    if (updateError) throw updateError;
-    const finalOrder = getSingle(finalData);
-    if (!finalOrder) throw new AppError(500, 'STATUS_UPDATE_FAILED', 'Status update failed.');
-    return finalOrder;
+    const { data, error } = await supabase.from('orders').update({ status: newStatus })
+        .eq('id', orderId).eq('farmer_id', farmerId).eq('status', order.status).select('*');
+    if (error) throw error;
+    const updated = getSingle(data);
+    if (!updated) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
+    return updated;
 };
 
 // 3. Mark Order as Shipped — farmer-only, and only from PAID or confirmed.
@@ -360,13 +223,13 @@ exports.markOrderAsShipped = async (order_id, farmer_id) => {
         .update({ status: 'SHIPPED' })
         .eq('id', order_id)
         .eq('farmer_id', farmer_id)
-        .in('status', ['PAID', 'confirmed'])
+        .eq('status', 'PAID')
         .select('*');
 
     if (error) throw error;
     const updated = getSingle(data);
     if (!updated) {
-        throw new AppError(409, 'ORDER_NOT_SHIPPABLE', 'Only a paid or confirmed order can be shipped.');
+        throw new AppError(409, 'ORDER_NOT_SHIPPABLE', 'Only a paid order can be shipped.');
     }
     return updated;
 };
@@ -767,11 +630,11 @@ exports.autoRefundJob = async () => {
             console.warn('claim_pending_refunds RPC unavailable, falling back to per-order claim:', rpcError.message);
             const { data: pending, error: pendingError } = await supabase
                 .from('orders')
-                .select('id')
+                .select('id, next_retry_at')
                 .eq('status', 'REFUND_PENDING')
                 .limit(50);
             if (pendingError) throw pendingError;
-            claimed = pending || [];
+            claimed = (pending || []).filter(row => !row.next_retry_at || Date.parse(row.next_retry_at) <= Date.now());
         } else {
             claimed = rpcData || [];
             claimedViaRpc = true;
