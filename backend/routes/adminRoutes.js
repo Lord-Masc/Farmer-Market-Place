@@ -10,6 +10,8 @@ const requireAuth = require('../middleware/requireAuth');
 const { requireAdmin } = require('../middleware/requireRole');
 const { AppError } = require('../utils/errors');
 const verificationService = require('../services/verificationService');
+const adminMetricsService = require('../services/adminMetricsService');
+const moderationService = require('../services/moderationService');
 
 router.use(requireAuth, requireAdmin);
 
@@ -82,6 +84,69 @@ router.post('/roles/:userId', async (req, res, next) => {
     if (!req.params.userId) throw new AppError(400, 'MISSING_FIELDS', 'User id is required.');
     const row = await verificationService.changeRole(req.user.id, req.params.userId, req.body && req.body.role);
     return res.json(row);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// ---- Stage 10: Admin & Platform Intelligence (module I) ----
+// All routes below sit under the same router.use(requireAuth,
+// requireAdmin) above. The metrics are aggregated only — the service
+// returns counts and sums, never per-user rows.
+
+// Platform metrics (admin view — same shape as the public transparency
+// endpoint, so one frontend component renders either source).
+router.get('/metrics', async (req, res, next) => {
+  try {
+    const metrics = await adminMetricsService.getPlatformMetrics();
+    return res.json({ metrics });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Stuck money: every order with money in a stuck state, from the
+// admin_stuck_money view (migration 20261125_admin_views.sql).
+router.get('/reconciliation', async (req, res, next) => {
+  try {
+    const stuck = await adminMetricsService.getStuckMoney();
+    return res.json({ stuck });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Look up a user by UUID or by email, for the Moderation page's search
+// box. The service returns the same generic 404 for every non-match,
+// so the response never leaks which identifier was wrong.
+router.get('/moderation/:query', async (req, res, next) => {
+  try {
+    if (!req.params.query) throw new AppError(400, 'MISSING_FIELDS', 'A user id or email is required.');
+    const result = await moderationService.lookupUser(req.params.query);
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Suspend a user: sets profiles.suspended_at AND hides all of their
+// products (that IS the takedown). See moderationService for semantics.
+router.post('/moderation/:userId/suspend', async (req, res, next) => {
+  try {
+    if (!req.params.userId) throw new AppError(400, 'MISSING_FIELDS', 'User id is required.');
+    const result = await moderationService.suspendUser(req.user.id, req.params.userId);
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Reinstate a user: clears suspended_at AND restores their products.
+router.post('/moderation/:userId/reinstate', async (req, res, next) => {
+  try {
+    if (!req.params.userId) throw new AppError(400, 'MISSING_FIELDS', 'User id is required.');
+    const result = await moderationService.reinstateUser(req.user.id, req.params.userId);
+    return res.json(result);
   } catch (err) {
     return next(err);
   }
