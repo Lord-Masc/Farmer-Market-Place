@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
 
 const Navbar = () => {
   const { user, profile, signOut } = useAuth();
@@ -41,6 +42,9 @@ const Navbar = () => {
         {user ? (
           /* ── LOGGED IN STATE ── */
           <div className="flex items-center gap-3">
+            {/* Notification bell (Stage 9): count from the API only. */}
+            <NotificationBell />
+
             {/* Dashboard Button */}
             <Link
               to={dashboardPath}
@@ -120,6 +124,13 @@ const Navbar = () => {
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
                   >
                     💬 सहायक (Assistant)
+                  </Link>
+                  <Link
+                    to="/notifications"
+                    onClick={() => setDropdownOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                  >
+                    🔔 Notifications
                   </Link>
                   {profile?.role === 'admin' && (
                     <Link
