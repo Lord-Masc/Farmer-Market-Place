@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { uploadImage, uploadVerificationDocument, verificationFetch } from '../services/escrowApi';
 import { validateImageFile } from '../utils/fileValidation';
 
 const UserProfile = () => {
@@ -9,6 +10,28 @@ const UserProfile = () => {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState(null);
+    const [verificationFile, setVerificationFile] = useState(null);
+    const [verificationError, setVerificationError] = useState('');
+    const [verificationSubmitting, setVerificationSubmitting] = useState(false);
+
+    // Farmer verification: upload a document, then file the submission.
+    // The profile re-fetch flips the status to Pending on success.
+    const handleVerificationSubmit = async () => {
+        const validationError = validateImageFile(verificationFile);
+        if (validationError) { setVerificationError(validationError); return; }
+        setVerificationSubmitting(true);
+        setVerificationError('');
+        try {
+            const { path } = await uploadVerificationDocument(verificationFile);
+            await verificationFetch('/submit', { method: 'POST', body: { document_path: path } });
+            setVerificationFile(null);
+            await fetchProfile();
+        } catch (err) {
+            setVerificationError(err.message);
+        } finally {
+            setVerificationSubmitting(false);
+        }
+    };
 
     useEffect(() => {
         if (!user) {
@@ -67,11 +90,8 @@ const UserProfile = () => {
                                          const validationError = validateImageFile(file);
                                          if (validationError) { alert(validationError); return; }
                                          try {
-                                             const fileName = `profile-${user.id}-${Date.now()}`;
-                                             const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
-                                             if (uploadError) throw uploadError;
-                                             const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                                             await supabase.from('profiles').update({ photo_url: data.publicUrl }).eq('id', user.id);
+                                             const publicUrl = await uploadImage(file, 'profile');
+                                             await supabase.from('profiles').update({ photo_url: publicUrl }).eq('id', user.id);
                                              window.location.reload();
                                          } catch (err) { alert(err.message); }
                                      }
@@ -79,7 +99,6 @@ const UserProfile = () => {
                             </label>
                         </div>
                         <h2 className="text-3xl font-playfair font-black text-green-deep">{profile?.first_name} {profile?.last_name}</h2>
-                        <span className="mt-2 inline-block px-4 py-1 bg-amber/20 text-amber text-[10px] font-black uppercase tracking-widest rounded-full ring-2 ring-amber/5">Verified {profile?.role}</span>
                         
                         <div className="w-full mt-10 space-y-4 border-t border-cream-dark pt-10 text-left">
                             <div className="flex items-center gap-4 group p-4 bg-cream/30 rounded-[28px] border border-cream-dark/50 hover:border-amber transition-all">
@@ -146,6 +165,63 @@ const UserProfile = () => {
                                 </button>
                             </form>
                         </div>
+
+                        {/* Farmer Verification — farmers only; status comes from profiles.verification_status */}
+                        {profile?.role === 'farmer' && (
+                            <div className="bg-white rounded-[48px] p-10 shadow-sm border border-cream-dark">
+                                <h3 className="text-xl font-bold text-green-deep mb-4 flex items-center gap-2">
+                                    <span className="w-8 h-8 rounded-xl bg-green-fresh/10 text-green-fresh flex items-center justify-center text-sm">✓</span>
+                                    Farmer Verification
+                                </h3>
+                                <p className="text-sm font-bold text-gray-500 mb-6">
+                                    Status: <span className="text-green-deep">
+                                        {profile?.verification_status === 'verified'
+                                            ? `Verified${profile?.verified_at ? ` on ${new Date(profile.verified_at).toLocaleDateString()}` : ''}`
+                                            : profile?.verification_status === 'pending'
+                                                ? 'Pending review'
+                                                : profile?.verification_status === 'rejected'
+                                                    ? 'Rejected'
+                                                    : 'Unverified'}
+                                    </span>
+                                </p>
+                                {profile?.verification_status === 'pending' ? (
+                                    <p className="text-sm font-bold text-green-deep bg-cream/50 rounded-3xl px-6 py-4">
+                                        Your verification document is under review. We will update your status once an admin has reviewed it.
+                                    </p>
+                                ) : profile?.verification_status === 'verified' ? (
+                                    <p className="text-sm font-bold text-green-deep bg-green-fresh/10 rounded-3xl px-6 py-4">
+                                        ✓ Verified farmer — your verification is confirmed.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {profile?.verification_status === 'rejected' && (
+                                            <p className="text-sm font-bold text-red-500 bg-red-50 rounded-3xl px-6 py-4">
+                                                Your previous submission was rejected. You can submit a new document below.
+                                            </p>
+                                        )}
+                                        <p className="text-sm font-bold text-gray-500">
+                                            Upload a photo of your identity document (JPEG, PNG or WebP, up to 5 MB) to get verified.
+                                        </p>
+                                        <input
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp"
+                                            onChange={(e) => { setVerificationFile(e.target.files[0] || null); setVerificationError(''); }}
+                                            className="w-full bg-cream/30 border-2 border-transparent focus:border-amber px-6 py-4 rounded-3xl outline-none transition-all font-bold text-green-deep text-sm"
+                                        />
+                                        {verificationError && (
+                                            <p className="text-sm font-bold text-red-500">{verificationError}</p>
+                                        )}
+                                        <button
+                                            onClick={handleVerificationSubmit}
+                                            disabled={verificationSubmitting}
+                                            className="w-full bg-green-deep text-white py-5 rounded-[32px] font-black text-sm shadow-2xl hover:bg-green-mid transform hover:-translate-y-1 active:scale-95 transition-all disabled:opacity-50 disabled:transform-none"
+                                        >
+                                            {verificationSubmitting ? 'Submitting...' : 'Submit for verification'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch } from '../services/escrowApi';
+import { escrowFetch, passportFetch, uploadImage } from '../services/escrowApi';
+import CropPassportCard from '../components/CropPassportCard';
 import { validateImageFile } from '../utils/fileValidation';
 
 const FarmerDashboard = () => {
@@ -31,6 +32,21 @@ const FarmerDashboard = () => {
   const [listingSuccessMsg, setListingSuccessMsg] = useState("");
   const [lightbox, setLightbox] = useState({ show: false, images: [], index: 0, productName: '' });
   
+  // Crop Passport State (Stage 2): one passport per product, public only
+  // once the farmer is verified — the backend enforces both.
+  const [passports, setPassports] = useState([]);
+  const [passportStats, setPassportStats] = useState(null);
+  const [passportsLoading, setPassportsLoading] = useState(true);
+  const [passportError, setPassportError] = useState('');
+  const [showPassportForm, setShowPassportForm] = useState(false);
+  const [passportSaving, setPassportSaving] = useState(false);
+  const [passportFormError, setPassportFormError] = useState('');
+  const [passportForm, setPassportForm] = useState({
+    product_id: '', crop: '', variety: '', quantity: '', unit: 'kg',
+    harvest_date: '', quality_grade: 'ungraded',
+  });
+  const [passportPhotos, setPassportPhotos] = useState([]);
+
   // Form State
   const [formData, setFormData] = useState({
     name: '',
@@ -159,7 +175,7 @@ const FarmerDashboard = () => {
     }
   }, [userLocation, locationName]);
 
-  const tabs = ['Dashboard', 'My Products', 'Orders', 'Payment Track', 'Analytics', 'Settings'];
+  const tabs = ['Dashboard', 'My Products', 'Crop Passports', 'Orders', 'Payment Track', 'Analytics', 'Settings'];
 
   useEffect(() => {
     if (!user && !loading) {
@@ -194,7 +210,7 @@ const FarmerDashboard = () => {
                     setShowLocationModal(true);
                 }
             }
-            await Promise.all([fetchMyProducts(), fetchMyOrders()]);
+            await Promise.all([fetchMyProducts(), fetchMyOrders(), fetchMyPassports()]);
           }
         } catch (err) {
           setError('An unexpected error occurred.');
@@ -217,7 +233,7 @@ const FarmerDashboard = () => {
               table: 'orders',
               filter: `farmer_id=eq.${user.id}`
           }, (payload) => {
-              if (payload.new && (payload.new.status === 'PAID' || payload.new.status === 'pending')) {
+              if (payload.new && (payload.new.status === 'PAID' || payload.new.status === 'PENDING')) {
                   setEscrowNotification({ 
                       show: true, 
                       orderId: payload.new.id, 
@@ -273,6 +289,86 @@ const FarmerDashboard = () => {
     }
   };
 
+  // Rates arrive as fractions (0–1); tolerate a backend that already sends a
+  // percent so a value can never render as e.g. 8500%.
+  const formatPassportRate = (rate) => (rate == null ? 'Not enough data yet' : `${Math.round(rate > 1 ? rate : rate * 100)}%`);
+
+  const fetchMyPassports = async () => {
+    setPassportsLoading(true);
+    setPassportError('');
+    try {
+        const data = await passportFetch('/mine');
+        setPassports(data.lots || []);
+        setPassportStats(data.stats ?? null);
+    } catch (err) {
+        setPassportError(err.message || 'Could not load your crop passports.');
+    } finally {
+        setPassportsLoading(false);
+    }
+  };
+
+  // Products that can still get a passport: one passport per product, so
+  // anything already in `passports` is excluded from the picker.
+  const passportableProducts = products.filter((p) => {
+    const hasPassport = passports.some((lot) => lot.product_id === p.id || lot.product_name === p.name);
+    return !hasPassport;
+  });
+
+  const handleCreatePassport = async (e) => {
+    e.preventDefault();
+    const quantity = parseFloat(passportForm.quantity);
+    if (!passportForm.product_id) {
+        setPassportFormError('Choose a product for this passport.');
+        return;
+    }
+    if (!passportForm.crop.trim()) {
+        setPassportFormError('Enter the crop name.');
+        return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+        setPassportFormError('Enter a valid quantity greater than 0.');
+        return;
+    }
+    if (!passportForm.harvest_date) {
+        setPassportFormError('Enter the harvest date.');
+        return;
+    }
+    if (passportPhotos.length > 5) {
+        setPassportFormError('Add at most 5 photos.');
+        return;
+    }
+
+    setPassportSaving(true);
+    setPassportFormError('');
+    try {
+        const photos = [];
+        for (const file of passportPhotos) {
+            photos.push(await uploadPhoto(file));
+        }
+        await passportFetch('/', {
+            method: 'POST',
+            body: {
+                product_id: passportForm.product_id,
+                crop: passportForm.crop.trim(),
+                variety: passportForm.variety.trim() || undefined,
+                quantity,
+                unit: passportForm.unit,
+                harvest_date: passportForm.harvest_date,
+                quality_grade: passportForm.quality_grade,
+                photos,
+            },
+        });
+        setPassportForm({ product_id: '', crop: '', variety: '', quantity: '', unit: 'kg', harvest_date: '', quality_grade: 'ungraded' });
+        setPassportPhotos([]);
+        setShowPassportForm(false);
+        await fetchMyPassports();
+    } catch (err) {
+        setPassportFormError(err.message || 'Could not create the passport.');
+    } finally {
+        setPassportSaving(false);
+    }
+  };
+
   const handleLogout = async (e) => {
     e.preventDefault();
     await signOut();
@@ -296,21 +392,9 @@ const FarmerDashboard = () => {
     const validationError = validateImageFile(file);
     if (validationError) throw new Error(validationError);
 
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}-${Math.random()}.${fileExt}`;
-    const filePath = `product-items/${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('product-images')
-      .upload(filePath, file);
-
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage
-      .from('product-images')
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
+    // Server-side MIME/magic-byte/size checks happen in the backend
+    // endpoint (Stage 0, H2); the returned URL is the stored image.
+    return await uploadImage(file, 'product');
   };
 
   const handlePublishProduct = async (e) => {
@@ -489,6 +573,28 @@ const FarmerDashboard = () => {
     setShowDeleteModal(true);
   };
 
+  const handleShipOrder = async (orderId) => {
+    if (!orderId) return;
+
+    setProcessingOrders(prev => ({ ...prev, [orderId]: true }));
+    try {
+        // Shipping is owned by the escrow backend, which only allows
+        // PAID -> SHIPPED for the order's own farmer.
+        await escrowFetch('/ship-order', {
+            method: 'POST',
+            body: { order_id: orderId }
+        });
+
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'SHIPPED' } : o));
+        fetchMyOrders();
+    } catch (err) {
+        console.error("Ship order failed:", err);
+        alert("⚠️ " + err.message);
+    } finally {
+        setProcessingOrders(prev => ({ ...prev, [orderId]: false }));
+    }
+  };
+
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     if (!orderId || !newStatus) return;
 
@@ -519,12 +625,11 @@ const FarmerDashboard = () => {
   };
 
   const renderStats = () => {
-    const totalEarnings = orders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').reduce((acc, curr) => acc + curr.total_price, 0);
+    const totalEarnings = orders.filter(o => o.status === 'DELIVERED' || o.status === 'COMPLETED').reduce((acc, curr) => acc + curr.total_price, 0);
     const stats = [
         { label: 'Total Earnings', value: `₹${totalEarnings || '0'}`, icon: '💰', trend: 'Lifetime income' },
         { label: 'Active Listings', value: products.length.toString(), icon: '🌾', trend: 'Live products' },
-        { label: 'Pending Orders', value: orders.filter(o => o.status === 'pending').length.toString(), icon: '📦', trend: 'New orders' },
-        { label: 'Farmer Rating', value: '4.8', icon: '⭐', trend: 'Very Reliable' },
+        { label: 'Pending Orders', value: orders.filter(o => o.status === 'PENDING').length.toString(), icon: '📦', trend: 'New orders' },
     ];
 
     return (
@@ -633,6 +738,98 @@ const FarmerDashboard = () => {
                 </div>
             </div>
         );
+      case 'Crop Passports':
+        return (
+            <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                    <h2 className="font-playfair text-2xl font-bold text-green-deep">Crop passports</h2>
+                    {passportableProducts.length > 0 && (
+                        <button onClick={() => setShowPassportForm(!showPassportForm)} className="bg-green-deep text-white px-6 py-2 rounded-xl font-bold">
+                            {showPassportForm ? 'Cancel' : '+ Create Passport'}
+                        </button>
+                    )}
+                </div>
+
+                <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
+                    <h3 className="font-playfair text-xl font-bold text-green-deep mb-4">Your track record</h3>
+                    {!passportStats ? (
+                        <p className="text-gray-500 font-medium">No orders yet — stats appear after your first delivery.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Deliveries</p>
+                                <p className="text-2xl font-black text-green-deep">{passportStats.deliveries ?? 0}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">On-time rate</p>
+                                <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.on_time_rate)}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
+                                <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.dispute_rate)}</p>
+                            </div>
+                        </div>
+                    )}
+                </section>
+
+                {showPassportForm && (
+                    <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
+                        <h3 className="font-playfair text-xl font-bold text-green-deep mb-6">New crop passport</h3>
+                        <form onSubmit={handleCreatePassport} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="md:col-span-2">
+                                <label className="text-xs font-bold uppercase text-gray-400">Product</label>
+                                <select required className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.product_id} onChange={e => setPassportForm({ ...passportForm, product_id: e.target.value })}>
+                                    <option value="">Select a product...</option>
+                                    {passportableProducts.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Crop</label><input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={passportForm.crop} onChange={e => setPassportForm({ ...passportForm, crop: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Variety</label><input className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Basmati..." value={passportForm.variety} onChange={e => setPassportForm({ ...passportForm, variety: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.quantity} onChange={e => setPassportForm({ ...passportForm, quantity: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Unit</label><select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.unit} onChange={e => setPassportForm({ ...passportForm, unit: e.target.value })}><option>kg</option><option>quintal</option></select></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Harvest date</label><input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.harvest_date} onChange={e => setPassportForm({ ...passportForm, harvest_date: e.target.value })} /></div>
+                            <div>
+                                <label className="text-xs font-bold uppercase text-gray-400">Quality grade</label>
+                                <select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.quality_grade} onChange={e => setPassportForm({ ...passportForm, quality_grade: e.target.value })}>
+                                    <option value="A">A</option>
+                                    <option value="B">B</option>
+                                    <option value="C">C</option>
+                                    <option value="ungraded">Ungraded</option>
+                                </select>
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="text-xs font-bold uppercase text-gray-400">Photos (up to 5)</label>
+                                <input type="file" multiple accept="image/*" className="w-full bg-cream rounded-xl p-4 mt-1" onChange={e => setPassportPhotos(Array.from(e.target.files || []).slice(0, 5))} />
+                                {passportPhotos.length > 0 && <p className="text-xs text-gray-500 mt-2">{passportPhotos.length} photo{passportPhotos.length > 1 ? 's' : ''} selected</p>}
+                            </div>
+                            {passportFormError && <p className="md:col-span-2 text-sm text-red-600">{passportFormError}</p>}
+                            <button type="submit" disabled={passportSaving} className="md:col-span-2 bg-green-fresh text-white font-black py-4 rounded-xl disabled:opacity-50">
+                                {passportSaving ? 'Creating...' : 'Create Passport'}
+                            </button>
+                        </form>
+                    </section>
+                )}
+
+                {passportsLoading ? (
+                    <p className="text-center py-10 text-gray-400 italic">Loading your passports...</p>
+                ) : passportError ? (
+                    <p className="text-center py-10 text-red-600">{passportError}</p>
+                ) : passports.length === 0 ? (
+                    <div className="py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
+                        <p className="text-gray-400 font-bold italic mb-4 text-xl">No crop passports yet.</p>
+                        <p className="text-gray-400 text-sm">Create one for a product to show buyers where their food comes from.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {passports.map((lot) => (
+                            <CropPassportCard key={lot.id || lot.product_id || lot.crop} lot={lot} />
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
       case 'Orders':
         return (
             <div className="bg-white rounded-3xl shadow-sm border border-cream-dark overflow-hidden">
@@ -670,55 +867,59 @@ const FarmerDashboard = () => {
                                     <td className="p-6">
                                         <div className="flex flex-col items-start gap-1">
                                             <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${
-                                                (order.status === 'pending' || order.status === 'CREATED' || order.status === 'PAID') ? 'bg-amber/20 text-amber' : 
-                                                order.status === 'confirmed' ? 'bg-green-deep text-amber border border-amber/10 shadow-sm' : 
-                                                (order.status === 'delivered' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-md' : 
-                                                order.status === 'declined' ? 'bg-red-500/20 text-red-600' :
+                                                (order.status === 'PENDING' || order.status === 'CREATED' || order.status === 'PAID') ? 'bg-amber/20 text-amber' : 
+                                                order.status === 'CONFIRMED' ? 'bg-green-deep text-amber border border-amber/10 shadow-sm' : 
+                                                (order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-md' : 
+                                                order.status === 'DECLINED' ? 'bg-red-500/20 text-red-600' :
                                                 order.status === 'SHIPPED' ? 'bg-blue-100 text-blue-600' :
                                                 'bg-green-fresh/20 text-green-fresh'
                                             }`}>
-                                                {(order.status === 'pending' || order.status === 'CREATED') ? 'New Request' : 
+                                                {(order.status === 'PENDING' || order.status === 'CREATED') ? 'New Request' : 
                                                  order.status === 'PAID' ? 'Payment Verified' :
-                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Order Completed' : 
-                                                 order.status === 'declined' ? 'Request Rejected' :
+                                                 (order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'Order Completed' : 
+                                                 order.status === 'DECLINED' ? 'Request Rejected' :
                                                  order.status}
                                             </span>
                                         </div>
                                     </td>
                                     <td className="p-6">
                                         <div className="flex gap-2">
-                                            {(order.status === 'pending' || order.status === 'CREATED') && (
+                                            {(order.status === 'PENDING' || order.status === 'CREATED') && (
                                                 <>
                                                     <button 
-                                                        onClick={() => handleUpdateOrderStatus(order.id, 'confirmed')} 
+                                                        onClick={() => handleUpdateOrderStatus(order.id, 'CONFIRMED')} 
                                                         className="bg-green-deep text-[9px] uppercase font-black px-4 py-2 rounded-xl text-amber shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 border border-amber/20"
                                                     >
                                                         <span>✅</span> Approve
                                                     </button>
                                                     <button 
-                                                        onClick={() => handleUpdateOrderStatus(order.id, 'declined')} 
+                                                        onClick={() => handleUpdateOrderStatus(order.id, 'DECLINED')} 
                                                         className="bg-red-50/50 text-[9px] uppercase font-black px-4 py-2 rounded-xl text-red-600 shadow-md hover:bg-red-100 active:scale-95 transition-all flex items-center gap-1 border border-red-200"
                                                     >
                                                         <span>❌</span> Decline
                                                     </button>
                                                 </>
                                             )}
-                                            {order.status === 'confirmed' && (
+                                            {order.status === 'CONFIRMED' && (
                                                 <span className="text-[10px] font-black text-amber uppercase italic flex items-center gap-1 opacity-70">
                                                     <span>⏳</span> Waiting for Payment...
                                                 </span>
                                             )}
                                             {order.status === 'PAID' && (
-                                                <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1 opacity-90 animate-pulse">
-                                                    <span>📦</span> Payment Verified. Dispatch Now!
-                                                </span>
+                                                <button
+                                                    onClick={() => handleShipOrder(order.id)}
+                                                    disabled={processingOrders[order.id]}
+                                                    className="bg-blue-600 text-[9px] uppercase font-black px-4 py-2 rounded-xl text-white shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 disabled:opacity-50"
+                                                >
+                                                    <span>🚚</span> {processingOrders[order.id] ? 'Shipping...' : 'Mark Shipped'}
+                                                </button>
                                             )}
-                                            {(order.status === 'delivered' || order.status === 'COMPLETED') && (
+                                            {(order.status === 'DELIVERED' || order.status === 'COMPLETED') && (
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1">
                                                     <span>💎</span> Paid & Completed
                                                 </span>
                                             )}
-                                            {order.status === 'declined' && (
+                                            {order.status === 'DECLINED' && (
                                                 <span className="text-[10px] font-black text-red-400 uppercase italic">
                                                     Order Rejected
                                                 </span>
@@ -736,11 +937,11 @@ const FarmerDashboard = () => {
             </div>
         );
       case 'Analytics': {
-          const deliveredOrders = orders.filter(o => o.status === 'delivered');
+          const deliveredOrders = orders.filter(o => o.status === 'DELIVERED');
           const totalRevenue = deliveredOrders.reduce((acc, curr) => acc + curr.total_price, 0);
           const fulfilledVolume = deliveredOrders.reduce((acc, curr) => acc + curr.quantity, 0);
           const avgOrderValue = deliveredOrders.length > 0 ? Math.round(totalRevenue / deliveredOrders.length) : 0;
-          const rejectionRate = orders.length > 0 ? Math.round((orders.filter(o => o.status === 'declined').length / orders.length) * 100) : 0;
+          const rejectionRate = orders.length > 0 ? Math.round((orders.filter(o => o.status === 'DECLINED').length / orders.length) * 100) : 0;
 
           // Simple grouping for crop breakdown
           const cropStats = {};
@@ -868,11 +1069,8 @@ const FarmerDashboard = () => {
                                      const validationError = validateImageFile(file);
                                      if (validationError) { alert(validationError); return; }
                                      try {
-                                         const fileName = `farmer-p-${user.id}-${Date.now()}`;
-                                         const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
-                                         if (uploadError) throw uploadError;
-                                         const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                                         await supabase.from('profiles').update({ photo_url: data.publicUrl }).eq('id', user.id);
+                                         const publicUrl = await uploadImage(file, 'profile');
+                                         await supabase.from('profiles').update({ photo_url: publicUrl }).eq('id', user.id);
                                          window.location.reload();
                                      } catch (err) { alert(err.message); }
                                  }
@@ -880,7 +1078,6 @@ const FarmerDashboard = () => {
                         </label>
                     </div>
                     <h3 className="text-2xl font-black text-green-deep font-playfair">{profile?.first_name} {profile?.last_name}</h3>
-                    <p className="text-[10px] font-black uppercase text-green-fresh tracking-widest mt-1">Verified Agro-Farmer</p>
                     
                     <div className="w-full mt-10 space-y-4 border-t border-cream-dark pt-8 text-left">
                         <div className="flex justify-between items-center bg-cream/30 p-3 rounded-xl border border-cream-dark/50">
@@ -992,7 +1189,7 @@ const FarmerDashboard = () => {
                                         <div className="absolute top-1/2 left-0 w-full h-[2px] bg-cream-dark -translate-y-1/2" />
                                         <div 
                                             className="absolute top-1/2 left-0 h-[2px] bg-amber -translate-y-1/2 transition-all duration-1000"
-                                            style={{ width: (order.status === 'COMPLETED' || order.status === 'delivered') ? '100%' : '50%' }}
+                                            style={{ width: (order.status === 'COMPLETED' || order.status === 'DELIVERED') ? '100%' : '50%' }}
                                         />
 
                                         <div className="relative z-10 flex flex-col items-center">
@@ -1001,27 +1198,27 @@ const FarmerDashboard = () => {
                                         </div>
 
                                         <div className="relative z-10 flex flex-col items-center">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'bg-green-fresh shadow-lg' : 'bg-amber text-white shadow-[0_0_20px_rgba(245,158,11,0.4)]'}`}>
-                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? '✅' : '🛡️'}
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'bg-green-fresh shadow-lg' : 'bg-amber text-white shadow-[0_0_20px_rgba(245,158,11,0.4)]'}`}>
+                                                {(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? '✅' : '🛡️'}
                                             </div>
-                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber animate-pulse'}`}>
-                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Order Completed' : 'Payment Verified'}
+                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'text-green-fresh' : 'text-amber animate-pulse'}`}>
+                                                {(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'Order Completed' : 'Payment Verified'}
                                             </p>
                                         </div>
 
                                         <div className="relative z-10 flex flex-col items-center">
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'bg-green-fresh text-white shadow-lg' : 'bg-cream-dark text-gray-300'}`}>💰</div>
-                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-gray-300'}`}>Arrived in Bank</p>
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'bg-green-fresh text-white shadow-lg' : 'bg-cream-dark text-gray-300'}`}>💰</div>
+                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'text-green-fresh' : 'text-gray-300'}`}>Arrived in Bank</p>
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="bg-cream/30 p-6 rounded-[24px] text-center lg:text-right min-w-[220px]">
                                     <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-tighter">Current Money Status</p>
-                                    <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber'}`}>
-                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
+                                    <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'text-green-fresh' : 'text-amber'}`}>
+                                        {(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
                                     </p>
-                                    {order.status !== 'COMPLETED' && order.status !== 'delivered' && (
+                                    {order.status !== 'COMPLETED' && order.status !== 'DELIVERED' && (
                                         <p className="text-[9px] text-gray-400 italic mt-2">Automatic farmer payouts are not configured yet.</p>
                                     )}
                                 </div>
@@ -1097,6 +1294,14 @@ const FarmerDashboard = () => {
             </div>
             <button onClick={() => setShowAddModal(true)} className="bg-green-fresh text-white px-6 py-2.5 rounded-full text-sm font-bold shadow-lg hover:scale-105 transition-all text-center">+ List New Crop</button>
         </header>
+        {/* Verification status — real DB status only, never self-asserted */}
+        {profile?.verification_status === 'verified' ? (
+            <div className="mb-6 inline-flex items-center gap-2 bg-green-fresh/10 text-green-deep text-xs font-black px-4 py-2 rounded-full border border-green-fresh/20">✓ Verified farmer</div>
+        ) : profile?.verification_status === 'pending' ? (
+            <p className="mb-6 text-sm font-bold text-gray-500">Your verification is under review.</p>
+        ) : (
+            <p className="mb-6 text-sm font-bold text-green-deep">Get verified to build buyer trust — <Link to="/user-profile" className="underline hover:text-amber">verify your identity</Link>.</p>
+        )}
         {renderContent()}
       </main>
 

@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { ordersFetch, publicPassportFetch } from '../services/escrowApi';
+import CropPassportCard from '../components/CropPassportCard';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import EscrowCheckout from '../components/EscrowCheckout';
@@ -17,10 +19,13 @@ const Checkout = () => {
     const [quantity, setQuantity] = useState(1);
     const [address, setAddress] = useState('');
     const [phone, setPhone] = useState('');
-    const [buyerName, setBuyerName] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [productPassport, setProductPassport] = useState(null);
+    // One idempotency key per checkout attempt, reused across retries so a
+    // retried submit never creates a duplicate order.
+    const orderKeyRef = useRef(null);
 
     useEffect(() => {
         if (!user) return;
@@ -29,7 +34,6 @@ const Checkout = () => {
                 const { data: profile } = await supabase.from('profiles')
                     .select('address,phone_number,phone,first_name,last_name').eq('id', user.id).single();
                 setAddress(profile?.address || '');
-                setBuyerName([profile?.first_name, profile?.last_name].filter(Boolean).join(' '));
                 setPhone(profile?.phone_number || profile?.phone || '');
 
                 let selectedProductId = productId;
@@ -38,8 +42,8 @@ const Checkout = () => {
                         .select('*').eq('id', orderId).eq('buyer_id', user.id).single();
                     if (orderError) throw orderError.code === 'PGRST116' ? new Error('Order not found.') : orderError;
                     if (data.status === 'PAID') throw new Error('This order is already paid.');
-                    if (data.status === 'declined') throw new Error('The farmer declined this request.');
-                    if (data.status !== 'confirmed') throw new Error('Payment is available only after farmer approval.');
+                    if (data.status === 'DECLINED') throw new Error('The farmer declined this request.');
+                    if (data.status !== 'CONFIRMED') throw new Error('Payment is available only after farmer approval.');
                     setOrder(data);
                     setQuantity(data.quantity);
                     setAddress(data.delivery_address || profile?.address || '');
@@ -61,6 +65,17 @@ const Checkout = () => {
         void load();
     }, [user?.id, orderId, productId]);
 
+    // The product's passport, when one exists. A 404 / empty response is a
+    // normal state (no verified passport), not an error — show nothing.
+    useEffect(() => {
+        if (!product?.id) return;
+        let cancelled = false;
+        publicPassportFetch(`/products/${product.id}/passport`)
+            .then((data) => { if (!cancelled && data.passport) setProductPassport(data.passport); })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [product?.id]);
+
     const unit = product?.unit || 'kg';
     const multiplier = unit === 'quintal' ? 100 : 1;
     const total = order?.total_price ?? Number(product?.user_price ?? product?.price) * Number(quantity) * multiplier;
@@ -79,12 +94,17 @@ const Checkout = () => {
         setSaving(true);
         setError('');
         try {
-            const { error: insertError } = await supabase.from('orders').insert({
-                buyer_id: user.id, farmer_id: product.farmer_id, product_id: product.id, buyer_name: buyerName,
-                quantity: qty, unit_at_order: unit, total_price: total, status: 'pending',
-                delivery_address: address.trim(), buyer_phone: phone.trim(),
+            // Price, farmer and total are derived server-side; the client
+            // only names the product, quantity, unit and delivery details.
+            if (!orderKeyRef.current) orderKeyRef.current = crypto.randomUUID();
+            await ordersFetch('/', {
+                method: 'POST',
+                body: {
+                    product_id: product.id, quantity: qty, unit,
+                    delivery_address: address.trim(), buyer_phone: phone.trim(),
+                },
+                headers: { 'Idempotency-Key': orderKeyRef.current },
             });
-            if (insertError) throw insertError;
             navigate('/buyer-dashboard?tab=My%20Orders');
         } catch (err) {
             setError(err.message || 'Could not place order request.');
@@ -109,6 +129,16 @@ const Checkout = () => {
                             <>
                                 <h2 className="text-xl font-bold">{product.name}</h2>
                                 <p className="text-emerald-700 font-bold mt-2">₹{total || 0}</p>
+                                {product.farmer_id && (
+                                    <Link to={`/farmers/${product.farmer_id}`} className="block mt-3 text-sm font-bold text-emerald-700 hover:text-emerald-800">
+                                        View this farmer's crop passport →
+                                    </Link>
+                                )}
+                                {productPassport && (
+                                    <div className="mt-4">
+                                        <CropPassportCard lot={productPassport} />
+                                    </div>
+                                )}
                                 {!order && (
                                     <form onSubmit={placeRequest} className="mt-6 space-y-4">
                                         <label className="block text-sm font-semibold">Quantity ({unit})

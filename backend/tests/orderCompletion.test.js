@@ -77,6 +77,12 @@ describe('markOrderAsCompleted payment release', () => {
     expect(db.payments[0].status).toBe('RELEASED');
   });
 
+  test('completion stamps completed_at (Stage 2: the on-time signal for farmer_stats)', async () => {
+    const result = await service.markOrderAsCompleted('order-1', 'buyer-1');
+    expect(db.orders[0].completed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(result.completed_at).toBe(db.orders[0].completed_at);
+  });
+
   test('payment-update error rolls the order back to PAID (audit H2)', async () => {
     loadService({ failPaymentsUpdate: true });
     let caught = null;
@@ -90,10 +96,30 @@ describe('markOrderAsCompleted payment release', () => {
     expect(db.payments[0].status).toBe('HELD');
   });
 
+  test('payment-update error also clears completed_at (Stage 2)', async () => {
+    loadService({ failPaymentsUpdate: true });
+    let caught = null;
+    try {
+      await service.markOrderAsCompleted('order-1', 'buyer-1');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeTruthy();
+    expect(db.orders[0].status).toBe('PAID');
+    expect(db.orders[0].completed_at).toBeNull();
+  });
+
   test('no HELD payment rolls the order back and refuses with 409', async () => {
     db.payments[0].status = 'REFUNDED';
     await expect(service.markOrderAsCompleted('order-1', 'buyer-1'))
       .rejects.toMatchObject({ code: 'ORDER_NOT_RELEASABLE', status: 409 });
     expect(db.orders[0].status).toBe('PAID');
+  });
+
+  test('no HELD payment also clears completed_at (Stage 2)', async () => {
+    db.payments[0].status = 'REFUNDED';
+    await expect(service.markOrderAsCompleted('order-1', 'buyer-1')).rejects.toMatchObject({ status: 409 });
+    expect(db.orders[0].status).toBe('PAID');
+    expect(db.orders[0].completed_at).toBeNull();
   });
 });

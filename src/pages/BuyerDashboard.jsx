@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch } from '../services/escrowApi';
+import { escrowFetch, ordersFetch, uploadImage } from '../services/escrowApi';
 import { validateImageFile } from '../utils/fileValidation';
 
 const BuyerDashboard = () => {
@@ -16,6 +16,10 @@ const BuyerDashboard = () => {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const autocompleteRef = useRef(null);
+  // One idempotency key per order-modal session: generated when the modal
+  // opens, reused across retries of the same order, regenerated for the
+  // next order — so a retried submit never creates a duplicate order.
+  const orderKeyRef = useRef(null);
   
   // Data State
   const [products, setProducts] = useState([]);
@@ -367,6 +371,7 @@ const BuyerDashboard = () => {
 
   const handleBuyProduct = (product) => {
     setSelectedProduct(product);
+    orderKeyRef.current = crypto.randomUUID();
     setOrderQuantity(1);
     setOrderUnit(product.unit || 'kg');
     setDeliveryAddress(profile?.address || '');
@@ -382,12 +387,9 @@ const BuyerDashboard = () => {
         alert("Please provide a delivery address.");
         return;
     }
-    
-    // Price handling (1 Quintal = 100 kg)
-    const basePrice = selectedProduct.user_price;
-    const finalTotal = orderUnit === 'quintal' ? (orderQuantity * 100 * basePrice) : (orderQuantity * basePrice);
-    
-    // Inventory check before order
+
+    // Client-side stock guard for fast feedback; the backend re-checks
+    // authoritatively, and derives price, farmer and total itself.
     const orderInKg = orderUnit === 'quintal' ? (orderQuantity * 100) : orderQuantity;
     if (orderInKg > selectedProduct.quantity) {
         alert(`🚨 Not Enough Stock: Farmer only has ${selectedProduct.quantity} KG available. Please reduce your quantity.`);
@@ -396,26 +398,21 @@ const BuyerDashboard = () => {
 
     setIsOrdering(true);
     try {
-        const { error } = await supabase.from('orders').insert([{
-            product_id: selectedProduct.id,
-            buyer_id: user.id,
-            farmer_id: selectedProduct.farmer_id || selectedProduct.farmer?.id,
-            farmer_name: selectedProduct.farmer?.first_name || 'Merchant',
-            farmer_phone: selectedProduct.farmer?.phone_number || '',
-            buyer_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' '),
-            quantity: orderQuantity,
-            unit_at_order: orderUnit,
-            total_price: finalTotal,
-            status: 'pending',
-            delivery_address: deliveryAddress,
-            buyer_phone: phoneNumber
-        }]);
+        await ordersFetch('/', {
+            method: 'POST',
+            body: {
+                product_id: selectedProduct.id,
+                quantity: orderQuantity,
+                unit: orderUnit,
+                delivery_address: deliveryAddress,
+                buyer_phone: phoneNumber,
+            },
+            headers: { 'Idempotency-Key': orderKeyRef.current || crypto.randomUUID() },
+        });
 
-        if (error) throw error;
-        
         // Success Transition (Animated, no intrusive alert)
         setOrderStep(3);
-        
+
         setTimeout(() => {
             setShowOrderModal(false);
             setActiveTab('My Orders');
@@ -448,6 +445,25 @@ const BuyerDashboard = () => {
     }
   };
 
+  const handleRequestRefund = async (id) => {
+    try {
+        const data = await escrowFetch('/refund', {
+            method: 'POST',
+            body: { order_id: id }
+        });
+        if (data.success) {
+            setStatusMessage({ show: true, type: 'success', text: 'Refund requested. It will be processed to your original payment method. 💸' });
+            fetchMyOrders();
+            setTimeout(() => setStatusMessage({ show: false, type: 'success', text: '' }), 4000);
+        } else {
+            throw new Error(data.error || data.message || "Refund request failed");
+        }
+    } catch (err) {
+        setStatusMessage({ show: true, type: 'error', text: "Error: " + err.message });
+        setTimeout(() => setStatusMessage({ show: false, type: 'error', text: '' }), 4000);
+    }
+  };
+
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
@@ -456,8 +472,8 @@ const BuyerDashboard = () => {
 
     const renderStats = () => {
         const totalSpent = orders.reduce((acc, curr) => acc + curr.total_price, 0) || 0;
-        const pendingCount = orders.filter(o => o.status === 'pending').length;
-        const confirmedCount = orders.filter(o => o.status === 'confirmed').length;
+        const pendingCount = orders.filter(o => o.status === 'PENDING').length;
+        const confirmedCount = orders.filter(o => o.status === 'CONFIRMED').length;
 
         return (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10 text-left">
@@ -484,14 +500,14 @@ const BuyerDashboard = () => {
                     
                     <div className="flex flex-col gap-2">
                         <button 
-                            onClick={() => { setActiveTab('My Orders'); setOrderFilter('confirmed'); }}
+                            onClick={() => { setActiveTab('My Orders'); setOrderFilter('CONFIRMED'); }}
                             className="flex justify-between items-center bg-green-fresh/10 hover:bg-green-fresh/20 p-2.5 rounded-xl transition-all"
                         >
                             <span className="text-xs font-black text-green-fresh uppercase">Confirmed</span>
                             <span className="bg-green-fresh text-white text-[10px] font-black px-2 py-0.5 rounded-lg">{confirmedCount}</span>
                         </button>
                         <button 
-                            onClick={() => { setActiveTab('My Orders'); setOrderFilter('pending'); }}
+                            onClick={() => { setActiveTab('My Orders'); setOrderFilter('PENDING'); }}
                             className="flex justify-between items-center bg-amber/10 hover:bg-amber/20 p-2.5 rounded-xl transition-all"
                         >
                             <span className="text-xs font-black text-amber uppercase">Pending</span>
@@ -501,33 +517,6 @@ const BuyerDashboard = () => {
                 </div>
 
                 {/* Static Stats Cards */}
-                <div 
-                    onClick={() => navigate('/reward-points')}
-                    className="bg-white p-6 rounded-2xl shadow-sm border border-transparent hover:border-amber transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
-                >
-                    <div className="flex justify-between items-start mb-4">
-                        <span className="text-2xl">✨</span>
-                        <p className="text-[10px] font-black text-amber opacity-0 group-hover:opacity-100 transition-opacity uppercase">See Rewards →</p>
-                    </div>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Reward Points</p>
-                    <h3 className="text-2xl font-black text-green-deep mb-2">
-                        {orders.filter(o => o.status === 'confirmed' || o.status === 'delivered').reduce((acc, curr) => acc + (10 + Math.floor(curr.total_price/100)), 0)}
-                    </h3>
-                    <span className="text-xs text-amber font-bold">Milestone: 500 PX</span>
-                </div>
-
-                <div 
-                    onClick={() => navigate('/community-deals')}
-                    className="bg-white p-6 rounded-2xl shadow-sm border border-transparent hover:border-amber transition-all group cursor-pointer hover:scale-[1.02] active:scale-95 lg:col-span-1"
-                >
-                    <div className="flex justify-between items-start mb-4">
-                        <span className="text-2xl">🤝</span>
-                        <p className="text-[10px] font-black text-amber opacity-0 group-hover:opacity-100 transition-opacity uppercase">Scan Deals →</p>
-                    </div>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Community Deals</p>
-                    <h3 className="text-2xl font-black text-green-deep mb-2">12 Active</h3>
-                    <span className="text-xs text-amber font-bold">Join now</span>
-                </div>
             </div>
         );
     };
@@ -555,7 +544,7 @@ const BuyerDashboard = () => {
                                         <p className="text-[10px] text-gray-400 uppercase font-black">{new Date(order.created_at).toLocaleDateString()}</p>
                                     </div>
                                 </div>
-                                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${order.status === 'pending' ? 'bg-amber/20 text-amber' : 'bg-green-fresh/20 text-green-fresh'}`}>
+                                <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${order.status === 'PENDING' ? 'bg-amber/20 text-amber' : 'bg-green-fresh/20 text-green-fresh'}`}>
                                     {order.status}
                                 </span>
                             </div>
@@ -682,7 +671,7 @@ const BuyerDashboard = () => {
       case 'My Orders':
         const filteredOrders = orders.filter(o => {
             if (orderFilter === 'All') return true;
-            if (orderFilter === 'History') return o.status === 'delivered' || o.status === 'cancelled';
+            if (orderFilter === 'History') return o.status === 'DELIVERED' || o.status === 'CANCELLED';
             return o.status === orderFilter;
         });
 
@@ -691,7 +680,7 @@ const BuyerDashboard = () => {
                 <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-cream-dark">
                     <h2 className="font-playfair text-xl font-black text-green-deep">Order History</h2>
                     <div className="flex gap-2">
-                        {['All', 'pending', 'confirmed', 'History'].map(f => (
+                        {['All', 'PENDING', 'CONFIRMED', 'History'].map(f => (
                             <button 
                                 key={f} 
                                 onClick={() => setOrderFilter(f)}
@@ -732,7 +721,7 @@ const BuyerDashboard = () => {
                                         <td className="p-6">
                                             <div className="min-w-[140px]">
                                                 <p className="text-sm font-black text-green-deep uppercase tracking-tighter">🌾 {order.farmer_name || order.farmer?.first_name || 'Agro-Farmer'}</p>
-                                                {order.status === 'pending' ? (
+                                                {order.status === 'PENDING' ? (
                                                     <p className="text-[10px] text-amber font-black tracking-widest mt-1 italic animate-pulse">📞 Contact on Approval</p>
                                                 ) : (
                                                     <p className="text-[11px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.farmer_phone || order.farmer?.phone_number || order.farmer?.phone || 'No Phone provided'}</p>
@@ -751,21 +740,21 @@ const BuyerDashboard = () => {
                                         <td className="p-6">
                                             <div className="flex flex-col items-start gap-1 min-w-[100px]">
                                                 <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${
-                                                    order.status === 'pending' ? 'bg-amber/20 text-amber animate-pulse' : 
-                                                    order.status === 'confirmed' ? 'bg-amber text-white shadow-lg' : 
-                                                    order.status === 'delivered' || order.status === 'COMPLETED' ? 'bg-green-deep text-white border border-green-fresh/30 shadow-lg' : 
-                                                    order.status === 'declined' ? 'bg-red-500 text-white' :
+                                                    order.status === 'PENDING' ? 'bg-amber/20 text-amber animate-pulse' : 
+                                                    order.status === 'CONFIRMED' ? 'bg-amber text-white shadow-lg' : 
+                                                    order.status === 'DELIVERED' || order.status === 'COMPLETED' ? 'bg-green-deep text-white border border-green-fresh/30 shadow-lg' : 
+                                                    order.status === 'DECLINED' ? 'bg-red-500 text-white' :
                                                     'bg-green-fresh/20 text-green-fresh'
                                                 }`}>
-                                                    {order.status === 'pending' ? '⏳ Waiting Farmer Approval' : 
-                                                     order.status === 'confirmed' ? '✅ Approved - Ready to Pay' :
-                                                     order.status === 'declined' ? '❌ Product Declined by Farmer' :
+                                                    {order.status === 'PENDING' ? '⏳ Waiting Farmer Approval' : 
+                                                     order.status === 'CONFIRMED' ? '✅ Approved - Ready to Pay' :
+                                                     order.status === 'DECLINED' ? '❌ Product Declined by Farmer' :
                                                      order.status}
                                                 </span>
                                             </div>
                                         </td>
                                         <td className="p-6 text-right">
-                                            {order.status === 'confirmed' && (
+                                            {order.status === 'CONFIRMED' && (
                                                 <button 
                                                    onClick={() => {
                                                         window.location.href = `/checkout?orderId=${encodeURIComponent(order.id)}`;
@@ -775,7 +764,7 @@ const BuyerDashboard = () => {
                                                     💳 Pay Securely ₹{order.total_price} →
                                                 </button>
                                             )}
-                                            {(order.status === 'PAID' || order.status === 'delivered' || order.status === 'SHIPPED') && (
+                                            {(order.status === 'PAID' || order.status === 'DELIVERED' || order.status === 'SHIPPED') && (
                                                 <button 
                                                     onClick={() => setConfirmModal({ show: true, orderId: order.id })}
                                                     className="bg-green-deep text-white text-[9px] font-black uppercase px-4 py-2 rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all"
@@ -783,7 +772,15 @@ const BuyerDashboard = () => {
                                                     Confirm Received ✅
                                                 </button>
                                             )}
-                                            {(order.status === 'delivered' || order.status === 'COMPLETED') && (
+                                            {order.status === 'SHIPPED' && order.delivery_deadline && new Date(order.delivery_deadline) < new Date() && (
+                                                <button
+                                                    onClick={() => handleRequestRefund(order.id)}
+                                                    className="bg-red-50 text-[9px] font-black uppercase px-4 py-2 rounded-xl text-red-600 shadow-md hover:bg-red-100 active:scale-95 transition-all border border-red-200"
+                                                >
+                                                    Request Refund 💸
+                                                </button>
+                                            )}
+                                            {(order.status === 'DELIVERED' || order.status === 'COMPLETED') && (
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center justify-end gap-1">
                                                     <span>✨</span> Order Completed
                                                 </span>
@@ -807,12 +804,12 @@ const BuyerDashboard = () => {
             </div>
             
             <div className="grid grid-cols-1 gap-6">
-              {orders.filter(o => o.status !== 'cancelled' && o.status !== 'pending').length === 0 ? (
+              {orders.filter(o => o.status !== 'CANCELLED' && o.status !== 'PENDING').length === 0 ? (
                 <div className="py-20 text-center bg-white rounded-3xl border border-cream-dark text-gray-400 font-bold italic">
                   No active secured payments to track. 🌿
                 </div>
               ) : (
-                orders.filter(o => o.status !== 'cancelled' && o.status !== 'pending' && o.status !== 'declined').map(order => (
+                orders.filter(o => o.status !== 'CANCELLED' && o.status !== 'PENDING' && o.status !== 'DECLINED').map(order => (
                   <div key={order.id} className="bg-white p-8 rounded-[32px] shadow-sm border border-cream-dark group hover:border-amber transition-all">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                       <div className="flex items-center gap-5">
@@ -832,7 +829,7 @@ const BuyerDashboard = () => {
                           <div className="absolute top-1/2 left-0 w-full h-[2px] bg-cream-dark -translate-y-1/2" />
                           <div 
                             className="absolute top-1/2 left-0 h-[3px] bg-green-fresh -translate-y-1/2 transition-all duration-1000"
-                            style={{ width: (order.status === 'delivered' || order.status === 'COMPLETED') ? '100%' : '50%' }}
+                            style={{ width: (order.status === 'DELIVERED' || order.status === 'COMPLETED') ? '100%' : '50%' }}
                           />
                           
                           {/* Steps */}
@@ -842,27 +839,27 @@ const BuyerDashboard = () => {
                           </div>
                           
                           <div className="relative z-10 flex flex-col items-center">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all ${(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'bg-amber text-white shadow-[0_0_20px_rgba(245,158,11,0.3)]' : 'bg-green-fresh text-white'}`}>
-                              {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? '🛡️' : '✅'}
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all ${(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? 'bg-amber text-white shadow-[0_0_20px_rgba(245,158,11,0.3)]' : 'bg-green-fresh text-white'}`}>
+                              {(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? '🛡️' : '✅'}
                             </div>
-                            <p className={`text-[10px] font-black uppercase mt-2 ${(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'text-amber animate-pulse' : 'text-green-fresh'}`}>
-                              {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'Payment Verified' : 'Order Completed'}
+                            <p className={`text-[10px] font-black uppercase mt-2 ${(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? 'text-amber animate-pulse' : 'text-green-fresh'}`}>
+                              {(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? 'Payment Verified' : 'Order Completed'}
                             </p>
                           </div>
                           
                           <div className="relative z-10 flex flex-col items-center">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'delivered' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-lg ring-4 ring-green-fresh/10' : 'bg-cream-dark text-gray-400'}`}>👨‍🌾</div>
-                            <p className={`text-[10px] font-black uppercase mt-2 ${(order.status === 'delivered' || order.status === 'COMPLETED') ? 'text-green-fresh' : 'text-gray-400'}`}>Farmer Paid</p>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-lg ring-4 ring-green-fresh/10' : 'bg-cream-dark text-gray-400'}`}>👨‍🌾</div>
+                            <p className={`text-[10px] font-black uppercase mt-2 ${(order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'text-green-fresh' : 'text-gray-400'}`}>Farmer Paid</p>
                           </div>
                         </div>
                       </div>
 
                       <div className="bg-cream/20 p-5 rounded-2xl border border-cream-dark/50 text-center lg:text-right min-w-[200px]">
                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-tighter mb-1">Current Fund Location</p>
-                        <p className={`text-sm font-black uppercase ${(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'text-amber' : 'text-green-fresh'}`}>
-                          {(order.status !== 'delivered' && order.status !== 'COMPLETED') ? 'Payment recorded' : 'Order completed'}
+                        <p className={`text-sm font-black uppercase ${(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? 'text-amber' : 'text-green-fresh'}`}>
+                          {(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? 'Payment recorded' : 'Order completed'}
                         </p>
-                        {(order.status !== 'delivered' && order.status !== 'COMPLETED') && (
+                        {(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') && (
                           <button 
                             onClick={() => setConfirmModal({ show: true, orderId: order.id })}
                             className="mt-3 w-full bg-green-deep text-white text-[9px] font-black py-2.5 rounded-xl uppercase hover:bg-green-fresh transition-all shadow-md"
@@ -899,11 +896,8 @@ const BuyerDashboard = () => {
                                      const validationError = validateImageFile(file);
                                      if (validationError) { alert(validationError); return; }
                                      try {
-                                         const fileName = `buyer-${user.id}-${Date.now()}`;
-                                         const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
-                                         if (uploadError) throw uploadError;
-                                         const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                                         await supabase.from('profiles').update({ photo_url: data.publicUrl }).eq('id', user.id);
+                                         const publicUrl = await uploadImage(file, 'profile');
+                                         await supabase.from('profiles').update({ photo_url: publicUrl }).eq('id', user.id);
                                          window.location.reload();
                                      } catch (err) { alert(err.message); }
                                  }
@@ -911,7 +905,6 @@ const BuyerDashboard = () => {
                         </label>
                     </div>
                     <h3 className="text-2xl font-black text-green-deep">{profile?.first_name} {profile?.last_name}</h3>
-                    <p className="text-xs font-black uppercase text-amber tracking-widest mt-1">Verified Agro-Buyer</p>
                     
                     <div className="w-full mt-10 space-y-4 border-t border-cream-dark pt-8 text-left">
                         <div>

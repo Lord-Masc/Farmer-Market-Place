@@ -23,7 +23,7 @@ const ConfirmedOrders = () => {
             .from('orders')
             .select('*, product:products(*)')
             .eq('buyer_id', user.id)
-            .in('status', ['confirmed', 'SHIPPED', 'PAID']);
+            .in('status', ['CONFIRMED', 'SHIPPED', 'PAID']);
         
         if (!error) setOrders(data || []);
         setLoading(false);
@@ -83,7 +83,7 @@ const ConfirmedOrders = () => {
                                     </p>
                                 </div>
 
-                                {order.status === 'confirmed' || order.status === 'SHIPPED' ? (
+                                {order.status === 'CONFIRMED' || order.status === 'SHIPPED' ? (
                                     <button 
                                         onClick={() => setConfirmModal({ show: true, orderId: order.id })}
                                         className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase rounded-2xl shadow-xl shadow-emerald-100 transition-all active:scale-95 flex items-center justify-center gap-2"

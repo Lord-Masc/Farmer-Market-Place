@@ -60,9 +60,6 @@ const Footer = () => {
         <span className="font-dmsans text-[0.85rem] text-white/40 font-light">
           © 2025 AgroConnect Technologies Pvt. Ltd. · Made with 🌾 in India
         </span>
-        <span className="font-dmsans text-[0.85rem] text-white/40 font-light">
-          Kisan Helpline: 1800-XXX-XXXX (Toll Free)
-        </span>
       </div>
     </footer>
   );

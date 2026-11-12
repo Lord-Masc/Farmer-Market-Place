@@ -23,3 +23,24 @@ jobs:
         working-directory: backend
       - run: npm test -- --runInBand
         working-directory: backend
+
+  # Secret scan (Stage 0, unit 7): blocks .env files and key patterns from
+  # landing in the tree. The gitleaks CLI binary is used directly (pinned
+  # release, no license needed) instead of gitleaks-action v2, which requires
+  # a paid license key.
+  # --no-git is deliberate: git history still holds the dead compromised
+  # keys from 2026-11-08 (history purge was skipped on Rishabh's word after
+  # he rotated them), so a history scan would fail forever on old commits.
+  # This job guards NEW content only — the current checkout.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gitleaks 8.28.0
+        run: |
+          curl -sSL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan working tree for secrets
+        run: gitleaks detect --no-git --source . --redact --exit-code 1

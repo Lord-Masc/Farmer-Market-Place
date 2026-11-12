@@ -1,6 +1,8 @@
 const Razorpay = require('razorpay');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { AppError, notAccessible } = require('../utils/errors');
+const { logAudit } = require('../utils/auditLog');
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -23,6 +25,13 @@ const razorpay = new Razorpay({
 
 // Helper: Handle supabase .single() safely
 const getSingle = (data) => (data && data.length > 0 ? data[0] : null);
+
+// NULL-deadline grace period (M4): legacy orders never got a deadline
+// (it is set when the payment is marked PAID). A NULL deadline alone must
+// never trigger a refund — only orders older than this, WITH a payments
+// row, are enqueued. Younger rows may simply not have reached payment yet;
+// rows with no payment have no money to refund.
+const NULL_DEADLINE_GRACE_DAYS = 7;
 
 // Helper: Retry logic for API calls (exponential backoff — delay doubles each attempt).
 // Only transient failures are retried: network errors (no statusCode) and
@@ -69,15 +78,162 @@ async function fetchOrder(order_id) {
     return order;
 }
 
+// 0. Create a marketplace order server-side (Stage 0, M2/R2).
+// The buyer only names a product, a quantity, a unit and a delivery
+// address. Price, farmer, counterparty contact details and the total are
+// derived from the product + profiles rows; anything the client sends for
+// those fields is ignored. The unit price is snapshotted (price_at_order)
+// so a later farmer price edit cannot brick payment. Stock is checked here
+// as a fast fail; the reservation still happens atomically on confirm.
+const ORDER_UNITS = ['kg', 'quintal'];
+
+async function fetchProfile(userId) {
+    const { data, error } = await supabase.from('profiles')
+        .select('first_name,last_name,phone_number').eq('id', userId);
+    if (error) throw error;
+    return getSingle(data);
+}
+
+exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey, opts = {}) => {
+    // opts.unitPriceOverride: negotiation acceptance passes the LOCKED
+    // price here instead of re-deriving it from the listing, so a later
+    // farmer price edit cannot change what the order charges. The
+    // override joins the idempotency hash, so the same key + a different
+    // locked price is a 422, not a silent replay.
+    const { product_id, quantity, unit = 'kg', delivery_address, buyer_phone } = input;
+    if (!product_id || quantity === undefined || quantity === null ||
+        !delivery_address || !String(delivery_address).trim()) {
+        throw new AppError(400, 'MISSING_FIELDS', 'Product, quantity and delivery address are required.');
+    }
+    const qty = validateQuantity(quantity);
+    if (!ORDER_UNITS.includes(unit)) {
+        throw new AppError(422, 'VALIDATION_ERROR', 'Unit must be kg or quintal.');
+    }
+    const address = String(delivery_address).trim();
+
+    // Idempotency: the key is claimed atomically via the UNIQUE(key, user_id)
+    // constraint — a check-then-insert would race under retries.
+    let requestHash = null;
+    if (idempotencyKey) {
+        // The locked price joins the hash ONLY when an override is present:
+        // the no-override hash stays byte-identical to before, so existing
+        // checkout idempotency is untouched. Same key + a different locked
+        // price still hashes differently (422), never a silent replay.
+        const hashInput = { buyerId, product_id, quantity: qty, unit, delivery_address: address, buyer_phone: buyer_phone ? String(buyer_phone).trim() : '' };
+        if (opts.unitPriceOverride != null) hashInput.lockedUnitPrice = Number(opts.unitPriceOverride);
+        requestHash = crypto.createHash('sha256')
+            .update(JSON.stringify(hashInput))
+            .digest('hex');
+        const { error: claimError } = await supabase.from('idempotency_keys')
+            .insert({ key: idempotencyKey, user_id: buyerId, request_hash: requestHash, status: 'in_progress' })
+            .select('*');
+        if (claimError) {
+            if (claimError.code === '23505' || String(claimError.message || '').includes('duplicate key')) {
+                const { data: existing, error: readError } = await supabase.from('idempotency_keys')
+                    .select('*').eq('key', idempotencyKey).eq('user_id', buyerId);
+                if (readError) throw readError;
+                const prior = getSingle(existing);
+                if (!prior) throw claimError;
+                if (prior.request_hash !== requestHash) {
+                    throw new AppError(422, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key was already used with a different order.');
+                }
+                if (prior.status === 'completed' && prior.response_body) return prior.response_body;
+                if (prior.status === 'failed') {
+                    // A previous attempt failed after claiming: reclaim the
+                    // key (gated on still-failed, so only one retry wins).
+                    const { data: reclaimed, error: reclaimError } = await supabase.from('idempotency_keys')
+                        .update({ status: 'in_progress' })
+                        .eq('key', idempotencyKey).eq('user_id', buyerId).eq('status', 'failed').select('*');
+                    if (reclaimError) throw reclaimError;
+                    if (!reclaimed || !reclaimed.length) {
+                        throw new AppError(409, 'IDEMPOTENCY_IN_PROGRESS', 'An order with this idempotency key is already being created.');
+                    }
+                } else {
+                    throw new AppError(409, 'IDEMPOTENCY_IN_PROGRESS', 'An order with this idempotency key is already being created.');
+                }
+            } else {
+                throw claimError;
+            }
+        }
+    }
+
+    try {
+        const { data: productRows, error: productError } = await supabase.from('products')
+            .select('id,farmer_id,user_price,price,quantity').eq('id', product_id);
+        if (productError) throw productError;
+        const product = getSingle(productRows);
+        if (!product) throw notAccessible();
+        if (product.farmer_id === buyerId) {
+            throw new AppError(403, 'FORBIDDEN', 'You cannot order your own product.');
+        }
+        const multiplier = unit === 'quintal' ? 100 : 1;
+        if (Number(product.quantity) < qty * multiplier) {
+            throw new AppError(409, 'INSUFFICIENT_STOCK', 'Insufficient stock for this order.');
+        }
+        const unitPrice = opts.unitPriceOverride != null
+            ? Number(opts.unitPriceOverride)
+            : Number(product.user_price ?? product.price);
+        if (opts.unitPriceOverride != null && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+            throw new AppError(422, 'VALIDATION_ERROR', 'Locked price must be a number greater than 0.');
+        }
+        const total = unitPrice * qty * multiplier;
+        if (!Number.isFinite(total) || total <= 0) {
+            throw new AppError(409, 'AMOUNT_MISMATCH', 'This product has no valid price.');
+        }
+        const [buyer, farmer] = await Promise.all([fetchProfile(buyerId), fetchProfile(product.farmer_id)]);
+        const farmerName = [farmer && farmer.first_name, farmer && farmer.last_name].filter(Boolean).join(' ');
+        // buyer_phone is the buyer's own delivery contact: an explicit value
+        // from the checkout form wins, otherwise the profile phone. (Only
+        // the buyer's own phone is ever accepted — farmer/buyer names and
+        // prices always come from the server's rows, never the client.)
+        const deliveryPhone = (buyer_phone && String(buyer_phone).trim())
+            || (buyer && buyer.phone_number) || '';
+        const { data: inserted, error: insertError } = await supabase.from('orders').insert({
+            buyer_id: buyerId,
+            farmer_id: product.farmer_id,
+            product_id: product.id,
+            quantity: qty,
+            unit_at_order: unit,
+            total_price: total,
+            price_at_order: unitPrice,
+            status: 'PENDING',
+            delivery_address: address,
+            buyer_phone: deliveryPhone,
+            farmer_name: farmerName || 'Merchant',
+            farmer_phone: (farmer && farmer.phone_number) || '',
+        }).select('*');
+        if (insertError) throw insertError;
+        const order = getSingle(inserted);
+        if (!order) throw new Error('Order creation returned no row.');
+        if (idempotencyKey) {
+            await supabase.from('idempotency_keys').update({
+                status: 'completed', response_status: 201, response_body: order,
+            }).eq('key', idempotencyKey).eq('user_id', buyerId);
+        }
+        await logAudit(buyerId, 'order.created', { order_id: order.id, product_id: product.id });
+        return order;
+    } catch (err) {
+        // A failed attempt frees the key so the client can retry with it.
+        // shortcut: a crash between claim and this cleanup leaves a stuck
+        // in_progress row; no sweeper exists yet — retry with a new key.
+        if (idempotencyKey) {
+            await supabase.from('idempotency_keys').update({ status: 'failed' })
+                .eq('key', idempotencyKey).eq('user_id', buyerId).catch(() => {});
+        }
+        throw err;
+    }
+};
+
 // 1. Create Razorpay Order.
-// Price binding: the charge must equal the product's listed price x quantity.
-// The product row is the source of truth. A client-supplied amount or seller
-// is never trusted; the stored order total must match the current listing.
+// Price binding: the charge must equal the price snapshot taken at order
+// time (price_at_order) x quantity — never the live listing, so a farmer
+// price edit after confirmation cannot brick payment (R2). Legacy orders
+// without a snapshot fall back to the live product price.
 exports.createRazorpayOrder = async (buyerId, orderId) => {
     if (!orderId) throw new AppError(400, 'MISSING_ORDER', 'An approved order is required.');
     const order = await fetchOrder(orderId);
     if (order.buyer_id !== buyerId) throw new AppError(403, 'FORBIDDEN', 'You can only pay for your own orders.');
-    if (order.status !== 'confirmed') throw new AppError(409, 'ORDER_NOT_PAYABLE', 'The farmer must approve this order before payment.');
+    if (order.status !== 'CONFIRMED') throw new AppError(409, 'ORDER_NOT_PAYABLE', 'The farmer must approve this order before payment.');
 
     const { data, error } = await supabase.from('products')
         .select('farmer_id,user_price,price').eq('id', order.product_id);
@@ -87,7 +243,10 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
 
     const quantity = validateQuantity(order.quantity);
     const multiplier = order.unit_at_order === 'quintal' ? 100 : 1;
-    const expected = Number(product.user_price ?? product.price) * quantity * multiplier;
+    const unitPrice = order.price_at_order != null
+        ? Number(order.price_at_order)
+        : Number(product.user_price ?? product.price);
+    const expected = unitPrice * quantity * multiplier;
     if (!Number.isFinite(expected) || expected <= 0 ||
         Math.round(expected * 100) !== Math.round(Number(order.total_price) * 100)) {
         throw new AppError(409, 'AMOUNT_MISMATCH', 'The product price changed. Please contact the farmer and place a new order.');
@@ -127,7 +286,7 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
     if (!order.razorpay_order_id) {
         const { data: saved, error: saveError } = await supabase.from('orders')
             .update({ razorpay_order_id: razorpayOrder.id })
-            .eq('id', order.id).eq('status', 'confirmed').is('razorpay_order_id', null).select('id');
+            .eq('id', order.id).eq('status', 'CONFIRMED').is('razorpay_order_id', null).select('id');
         if (saveError) throw saveError;
         if (!saved?.length) throw new AppError(409, 'PAYMENT_ORDER_CONFLICT', 'A payment attempt is already being created. Please refresh and try again.');
     }
@@ -144,7 +303,7 @@ exports.createRazorpayOrder = async (buyerId, orderId) => {
 exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment_id, buyer_id) => {
     const order = await fetchOrder(order_id);
     if (order.buyer_id !== buyer_id) throw new AppError(403, 'FORBIDDEN', 'You can only pay for your own orders.');
-    if (!['confirmed', 'PAID'].includes(order.status)) {
+    if (!['CONFIRMED', 'PAID'].includes(order.status)) {
         throw new AppError(409, 'ORDER_NOT_PAYABLE', 'Only a farmer-approved order can be paid.');
     }
     if (!order.razorpay_order_id || order.razorpay_order_id !== razorpay_order_id) {
@@ -174,16 +333,32 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
     if (used && used.order_id !== order_id) {
         throw new AppError(409, 'PAYMENT_ALREADY_USED', 'This payment has already been used for another order.');
     }
+    // One ledger row per order. A second, different payment for the same
+    // order is a duplicate charge (buyer paid twice): refund it at the
+    // gateway and keep the first payment as the ledger row — never record
+    // two HELD rows, or completion would release both (L4).
     if (!used) {
-        const { error: insertError } = await supabase.from('payments').insert({
-            order_id, amount: Number(payment.amount) / 100, status: 'HELD', razorpay_payment_id,
-        });
-        if (insertError) {
-            const { data: sameOrder, error: retryError } = await supabase.from('payments')
-                .select('*').eq('order_id', order_id);
-            if (retryError) throw retryError;
-            const saved = getSingle(sameOrder);
-            if (!saved || saved.razorpay_payment_id !== razorpay_payment_id) throw insertError;
+        const { data: orderPayments, error: orderPayError } = await supabase.from('payments')
+            .select('*').eq('order_id', order_id);
+        if (orderPayError) throw orderPayError;
+        const recorded = getSingle(orderPayments);
+        if (recorded) {
+            await refundDuplicatePayment(razorpay_payment_id, Number(payment.amount), order_id);
+        } else {
+            const { error: insertError } = await supabase.from('payments').insert({
+                order_id, amount: Number(payment.amount) / 100, status: 'HELD', razorpay_payment_id,
+            });
+            if (insertError) {
+                // Lost a race: re-read; a row for this order now exists.
+                const { data: raced, error: raceError } = await supabase.from('payments')
+                    .select('*').eq('order_id', order_id);
+                if (raceError) throw raceError;
+                const saved = getSingle(raced);
+                if (!saved) throw insertError;
+                if (saved.razorpay_payment_id !== razorpay_payment_id) {
+                    await refundDuplicatePayment(razorpay_payment_id, Number(payment.amount), order_id);
+                }
+            }
         }
     }
 
@@ -193,24 +368,47 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
         updates.delivery_deadline = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
     }
     const { data: updated, error: updateError } = await supabase.from('orders')
-        .update(updates).eq('id', order_id).eq('status', 'confirmed').select('*');
+        .update(updates).eq('id', order_id).eq('status', 'CONFIRMED').select('*');
     if (updateError) throw updateError;
     const paidOrder = getSingle(updated);
-    if (paidOrder) return paidOrder;
+    // Only the transition that actually flipped CONFIRMED -> PAID is
+    // logged; a replay (order already PAID) returns below without a row.
+    if (paidOrder) {
+        await logAudit(buyer_id, 'order.paid', { order_id });
+        return paidOrder;
+    }
 
     const latest = await fetchOrder(order_id);
     if (latest.status === 'PAID') return latest;
     throw new AppError(409, 'ORDER_NOT_PAYABLE', 'This order is no longer awaiting payment.');
 };
 
+// 2c. Webhook entry: a payment.captured event for a Razorpay order. Finds
+// the internal order by its stored razorpay_order_id and marks it PAID
+// through the same idempotent path as the browser callback. Returns null
+// when the Razorpay order is not ours — logged, not an error, so the
+// webhook is acknowledged instead of retried forever.
+exports.handlePaymentCaptured = async (payment) => {
+    if (!payment || !payment.order_id || !payment.id) return null;
+    const { data, error } = await supabase.from('orders')
+        .select('*').eq('razorpay_order_id', payment.order_id);
+    if (error) throw error;
+    const order = getSingle(data);
+    if (!order) {
+        console.warn(`Webhook payment.captured for unknown Razorpay order ${payment.order_id}; no internal order.`);
+        return null;
+    }
+    return exports.verifyAndMarkPaid(order.id, payment.order_id, payment.id, order.buyer_id);
+};
+
 // 2b. Farmer Update Status Logic (with Stock Management).
 // Allowed farmer transitions. COMPLETED is intentionally absent: only the
 // buyer's delivery confirmation can complete an order and update payment status.
-// There is no path back from 'confirmed'/'declined' — a revert would let a
+// There is no path back from 'CONFIRMED'/'DECLINED' — a revert would let a
 // second confirm decrement stock again.
 const ORDER_TRANSITIONS = {
-    pending: ['confirmed', 'declined'],
-    CREATED: ['confirmed', 'declined'],
+    PENDING: ['CONFIRMED', 'DECLINED'],
+    CREATED: ['CONFIRMED', 'DECLINED'],
 };
 
 exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
@@ -220,7 +418,7 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
         throw new AppError(409, 'INVALID_TRANSITION', 'This status change is not allowed for the order.');
     }
 
-    if (newStatus === 'confirmed') {
+    if (newStatus === 'CONFIRMED') {
         const { data, error } = await supabase.rpc('confirm_order_and_reserve_stock', {
             p_order_id: orderId, p_farmer_id: farmerId,
         });
@@ -231,7 +429,9 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
             if (/INVALID_TRANSITION/.test(error.message)) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
             throw error;
         }
-        return getSingle(Array.isArray(data) ? data : data ? [data] : null);
+        const confirmed = getSingle(Array.isArray(data) ? data : data ? [data] : null);
+        await logAudit(farmerId, 'order.confirmed', { order_id: orderId });
+        return confirmed;
     }
 
     const { data, error } = await supabase.from('orders').update({ status: newStatus })
@@ -239,6 +439,7 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
     if (error) throw error;
     const updated = getSingle(data);
     if (!updated) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
+    await logAudit(farmerId, 'order.declined', { order_id: orderId });
     return updated;
 };
 
@@ -259,6 +460,7 @@ exports.markOrderAsShipped = async (order_id, farmer_id) => {
     if (!updated) {
         throw new AppError(409, 'ORDER_NOT_SHIPPABLE', 'Only a paid order can be shipped.');
     }
+    await logAudit(farmer_id, 'order.shipped', { order_id });
     return updated;
 };
 
@@ -276,9 +478,10 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
     // Capture the previous status BEFORE the update: the fetched row is a
     // live reference, so order.status changes once the update applies.
     const prevStatus = order.status;
+    const completedAt = new Date().toISOString();
     const { data, error: orderError } = await supabase
         .from('orders')
-        .update({ status: 'COMPLETED' })
+        .update({ status: 'COMPLETED', completed_at: completedAt })
         .eq('id', order_id)
         .in('status', ['PAID', 'SHIPPED'])
         .select('*');
@@ -296,20 +499,23 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
         .select('*');
     if (paymentError) {
         // The order is already COMPLETED — roll it back, otherwise the
-        // payment stays HELD forever with no reconciler (audit H2).
+        // payment stays HELD forever with no reconciler (audit H2). The
+        // completion timestamp is cleared too: the order never completed.
         const { error: rollbackError } = await supabase.from('orders')
-            .update({ status: prevStatus }).eq('id', order_id);
+            .update({ status: prevStatus, completed_at: null }).eq('id', order_id);
         if (rollbackError) console.error('Failed to roll back order after payment-release error:', rollbackError.message);
         throw paymentError;
     }
     if (!payData || payData.length === 0) {
         // No HELD payment to release — roll the order back and refuse.
+        // The completion timestamp is cleared with it.
         const { error: rollbackError } = await supabase.from('orders')
-            .update({ status: prevStatus }).eq('id', order_id);
+            .update({ status: prevStatus, completed_at: null }).eq('id', order_id);
         if (rollbackError) console.error('Failed to roll back order after unreleasable payment:', rollbackError.message);
         throw new AppError(409, 'ORDER_NOT_RELEASABLE', 'Only a paid or shipped order can be completed.');
     }
 
+    await logAudit(buyer_id, 'order.completed', { order_id });
     return updated;
 };
 
@@ -339,7 +545,15 @@ exports.markRefundPending = async (order_id, opts = {}) => {
         .eq('id', order_id)
         .select('*');
     if (error) throw error;
-    return getSingle(data);
+    // A null row is the idempotent no-op (already REFUND_PENDING, REFUNDED,
+    // COMPLETED or CREATED) — nothing changed, nothing to record. Only a
+    // manual (buyer) request is logged; the cron's enqueue is a system
+    // action covered by the order.refunded row when it completes.
+    const requested = getSingle(data);
+    if (requested && buyerId !== null) {
+        await logAudit(buyerId, 'order.refund_requested', { order_id });
+    }
+    return requested;
 };
 
 // ---------------------------------------------------------------------------
@@ -368,6 +582,10 @@ async function completeRefundStatuses(order_id, gatewayRefundId, message) {
     if (payErr) {
         throw Object.assign(new Error('Refund Failed: ' + payErr.message), { postGateway: true, gateway_refund_id: gatewayRefundId });
     }
+    // The single completion point for every refund path (manual, cron,
+    // reconciler) — actor is null: the initiator is not known here, and
+    // the gateway refund id is the traceable handle.
+    await logAudit(null, 'order.refunded', { order_id, gateway_refund_id: gatewayRefundId });
     return { success: true, message, gateway_refund_id: gatewayRefundId };
 }
 
@@ -385,6 +603,18 @@ async function findExistingGatewayRefund(paymentId, amountPaise) {
         console.warn('Could not list existing gateway refunds:', err.message);
         return null;
     }
+}
+
+// Refund a duplicate capture: the buyer paid twice for one order, so the
+// second payment goes back to them in full. A failed refund is a 409 with
+// a clear code — never a raw 500 with money captured and no ledger row.
+async function refundDuplicatePayment(razorpayPaymentId, amountPaise, orderId) {
+    try {
+        await refundWithIdempotentRetry(razorpayPaymentId, amountPaise);
+    } catch (err) {
+        throw new AppError(409, 'PAYMENT_DUPLICATE', 'A second payment was captured for this order and its refund failed. Contact support with the payment id.');
+    }
+    console.warn(`Duplicate payment ${razorpayPaymentId} for order ${orderId} refunded at gateway; first payment remains the ledger row.`);
 }
 
 // Call the gateway refund with retries, re-checking for an existing refund
@@ -645,20 +875,36 @@ exports.autoRefundJob = async () => {
 
         // Step 1: Move past-deadline refundable orders into the refund queue.
         // Idempotent (PAID/SHIPPED -> REFUND_PENDING); two runs setting the
-        // same target state is harmless. A NULL deadline means the order
-        // never got one — it is overdue by definition, so enqueue it too.
+        // same target state is harmless.
         const { error: enqueueError } = await supabase
             .from('orders')
             .update({ status: 'REFUND_PENDING' })
             .in('status', ['PAID', 'SHIPPED'])
             .lt('delivery_deadline', now);
         if (enqueueError) throw enqueueError;
-        const { error: nullDeadlineError } = await supabase
+        // NULL-deadline rows (M4): enqueue only those older than the grace
+        // period WITH a payments row, one at a time — a bulk update cannot
+        // express the payments-row check, and a row with no payment has no
+        // money to refund (it would only fail as REFUND_FAILED).
+        const graceCutoff = new Date(Date.now() - NULL_DEADLINE_GRACE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+        const { data: nullDeadline, error: nullDeadlineError } = await supabase
             .from('orders')
-            .update({ status: 'REFUND_PENDING' })
+            .select('id')
             .in('status', ['PAID', 'SHIPPED'])
-            .is('delivery_deadline', null);
+            .is('delivery_deadline', null)
+            .lt('created_at', graceCutoff)
+            .limit(100);
         if (nullDeadlineError) throw nullDeadlineError;
+        for (const row of nullDeadline || []) {
+            const { data: payRows, error: payError } = await supabase.from('payments')
+                .select('id').eq('order_id', row.id).limit(1);
+            if (payError) throw payError;
+            if (!payRows || payRows.length === 0) continue;
+            const { error: enqueueOneError } = await supabase.from('orders')
+                .update({ status: 'REFUND_PENDING' })
+                .eq('id', row.id).in('status', ['PAID', 'SHIPPED']);
+            if (enqueueOneError) throw enqueueOneError;
+        }
 
         // Step 2: Atomically claim a batch with FOR UPDATE SKIP LOCKED.
         // Only this run's claimed rows are returned; a concurrent run skips them.

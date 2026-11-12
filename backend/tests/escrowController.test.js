@@ -15,6 +15,7 @@ process.env.RAZORPAY_KEY_SECRET = SECRET;
 
 const mockService = {
   createRazorpayOrder: jest.fn(),
+  createMarketplaceOrder: jest.fn(),
   verifyAndMarkPaid: jest.fn(),
   updateOrderStatusWithStock: jest.fn(),
   markOrderAsShipped: jest.fn(),
@@ -125,5 +126,65 @@ describe('verifyPayment signature check', () => {
     await promise;
     expect(mockService.verifyAndMarkPaid).not.toHaveBeenCalled();
     expect(next.mock.calls[0][0]).toMatchObject({ status: 400, code: 'MISSING_FIELDS' });
+  });
+});
+
+describe('createMarketplaceOrder (POST /api/orders)', () => {
+  let controller;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    controller = require('../controllers/escrowController');
+  });
+
+  function callCreate(body, headers = {}) {
+    const req = { body, headers, user: { id: 'buyer-1' } };
+    const res = mockRes();
+    const next = jest.fn();
+    return { req, res, next, promise: controller.createMarketplaceOrder(req, res, next) };
+  }
+
+  test('creates the order server-side and returns 201', async () => {
+    const order = { id: 'order-1', status: 'PENDING', total_price: 100 };
+    mockService.createMarketplaceOrder.mockResolvedValue(order);
+    const { res, next, promise } = callCreate(
+      { product_id: 'prod-1', quantity: 2, unit: 'kg', delivery_address: 'Village X' },
+      { 'idempotency-key': 'key-1' },
+    );
+    await promise;
+    expect(mockService.createMarketplaceOrder).toHaveBeenCalledWith('buyer-1', {
+      product_id: 'prod-1', quantity: 2, unit: 'kg', delivery_address: 'Village X',
+    }, 'key-1');
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith(order);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('client-supplied totals are never forwarded to the service', async () => {
+    mockService.createMarketplaceOrder.mockResolvedValue({ id: 'order-1' });
+    const { promise } = callCreate({
+      product_id: 'prod-1', quantity: 2, total_price: 1, farmer_id: 'attacker', delivery_address: 'Village X',
+    });
+    await promise;
+    const forwarded = mockService.createMarketplaceOrder.mock.calls[0][1];
+    expect(forwarded).not.toHaveProperty('total_price');
+    expect(forwarded).not.toHaveProperty('farmer_id');
+  });
+
+  test('missing fields are rejected with 400 before the service is called', async () => {
+    const { next, promise } = callCreate({ product_id: 'prod-1' });
+    await promise;
+    expect(mockService.createMarketplaceOrder).not.toHaveBeenCalled();
+    expect(next.mock.calls[0][0]).toMatchObject({ status: 400, code: 'MISSING_FIELDS' });
+  });
+
+  test('service errors reach the error handler', async () => {
+    mockService.createMarketplaceOrder.mockRejectedValue(
+      Object.assign(new Error('no stock'), { status: 409, code: 'INSUFFICIENT_STOCK' }),
+    );
+    const { next, promise } = callCreate({ product_id: 'prod-1', quantity: 999, delivery_address: 'Village X' });
+    await promise;
+    expect(next.mock.calls[0][0]).toMatchObject({ status: 409, code: 'INSUFFICIENT_STOCK' });
   });
 });
