@@ -146,7 +146,7 @@ describe('escrow security', () => {
 
   beforeEach(() => {
     jest.resetModules();
-    db = { orders: [], payments: [], refunds: [], products: [] };
+    db = { orders: [], payments: [], refunds: [], products: [], profiles: [] };
     rzp = makeRazorpayMock();
     mockHolder.supabase = makeSupabaseMock(db);
     mockHolder.razorpay = rzp;

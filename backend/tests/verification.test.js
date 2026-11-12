@@ -410,9 +410,14 @@ describe('routes mount the right guards', () => {
     expect(guardIndex).toBeLessThan(firstRouteIndex);
     expect(adminRoutes.stack.filter((l) => l.route).map((l) => `${Object.keys(l.route.methods)[0].toUpperCase()} ${l.route.path}`).sort())
       .toEqual([
+        'GET /metrics',
+        'GET /moderation/:query',
+        'GET /reconciliation',
         'GET /roles',
         'GET /verifications',
         'GET /verifications/:id/document',
+        'POST /moderation/:userId/reinstate',
+        'POST /moderation/:userId/suspend',
         'POST /roles/:userId',
         'POST /verifications/:id/approve',
         'POST /verifications/:id/reject',
