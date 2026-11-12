@@ -140,25 +140,25 @@ const Disputes = () => {
         {stats && (
           <section className="grid grid-cols-2 sm:grid-cols-5 gap-6 mb-10">
             <div className="bg-white rounded-[24px] p-6 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Total</p>
+              <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Total</p>
               <p className="text-2xl font-black text-green-deep">{stats.total ?? 0}</p>
             </div>
             <div className="bg-white rounded-[24px] p-6 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Open</p>
+              <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Open</p>
               <p className="text-2xl font-black text-green-deep">{stats.open ?? 0}</p>
             </div>
             <div className="bg-white rounded-[24px] p-6 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Resolved</p>
+              <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Resolved</p>
               <p className="text-2xl font-black text-green-deep">{stats.resolved ?? 0}</p>
             </div>
             <div className="bg-white rounded-[24px] p-6 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Resolution rate</p>
+              <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Resolution rate</p>
               <p className="text-2xl font-black text-green-deep">
                 {stats.resolution_rate == null ? 'No disputes yet' : `${Math.round(stats.resolution_rate > 1 ? stats.resolution_rate : stats.resolution_rate * 100)}%`}
               </p>
             </div>
             <div className="bg-white rounded-[24px] p-6 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Avg. resolution time</p>
+              <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Avg. resolution time</p>
               <p className="text-2xl font-black text-green-deep">
                 {stats.avg_resolution_hours == null ? 'No disputes yet' : `${Math.round(stats.avg_resolution_hours)}h`}
               </p>
@@ -171,8 +171,8 @@ const Disputes = () => {
             <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">File a dispute</h2>
             <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="text-xs font-bold uppercase text-gray-400">Order</label>
-                <select required className="w-full bg-cream rounded-xl p-4 mt-1" value={form.orderId} onChange={(e) => setForm({ ...form, orderId: e.target.value })}>
+                <label className="text-xs font-bold uppercase text-gray-600" htmlFor="order">Order</label>
+                <select id="order" required className="w-full bg-cream rounded-xl p-4 mt-1" value={form.orderId} onChange={(e) => setForm({ ...form, orderId: e.target.value })}>
                   <option value="">Choose one of your orders…</option>
                   {orders.map((o) => (
                     <option key={o.id} value={o.id}>
@@ -185,8 +185,8 @@ const Disputes = () => {
                 )}
               </div>
               <div>
-                <label className="text-xs font-bold uppercase text-gray-400">Category</label>
-                <select required className="w-full bg-cream rounded-xl p-4 mt-1" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                <label className="text-xs font-bold uppercase text-gray-600" htmlFor="category">Category</label>
+                <select id="category" required className="w-full bg-cream rounded-xl p-4 mt-1" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
                   <option value="">Choose a category…</option>
                   {CATEGORIES.map((c) => (
                     <option key={c} value={c}>{c.replace('_', ' ')}</option>
@@ -194,10 +194,10 @@ const Disputes = () => {
                 </select>
               </div>
               <div className="md:col-span-2">
-                <label className="text-xs font-bold uppercase text-gray-400">What went wrong?</label>
-                <textarea required rows={4} className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Describe the problem with this order…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                <label className="text-xs font-bold uppercase text-gray-600" htmlFor="what-went-wrong">What went wrong?</label>
+                <textarea id="what-went-wrong" required rows={4} className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Describe the problem with this order…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
-              {formError && <p className="md:col-span-2 text-sm text-red-600">{formError}</p>}
+              {formError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{formError}</p>}
               <button type="submit" disabled={saving} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                 {saving ? 'Filing...' : 'File Dispute'}
               </button>
@@ -211,7 +211,7 @@ const Disputes = () => {
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
-                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${statusFilter === s ? 'bg-green-deep text-white shadow-lg' : 'bg-white text-gray-400 hover:bg-amber/10 hover:text-amber'}`}
+                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${statusFilter === s ? 'bg-green-deep text-white shadow-lg' : 'bg-white text-gray-600 hover:bg-amber/10 hover:text-amber'}`}
               >
                 {s === 'all' ? 'All' : STATUS_LABELS[s]}
               </button>
@@ -222,9 +222,9 @@ const Disputes = () => {
         {forbidden ? (
           <p className="py-20 text-center text-gray-500 font-medium">You don&apos;t have access to this page.</p>
         ) : listLoading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading disputes...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading disputes...</p>
         ) : listError ? (
-          <p className="py-20 text-center text-red-600">{listError}</p>
+          <p aria-live="polite" className="py-20 text-center text-red-600">{listError}</p>
         ) : disputes.length === 0 ? (
           <p className="text-gray-500 font-medium py-10 text-center border-4 border-dashed border-cream-dark rounded-[48px]">No disputes yet.</p>
         ) : (

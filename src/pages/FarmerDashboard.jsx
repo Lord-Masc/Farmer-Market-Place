@@ -733,7 +733,7 @@ const FarmerDashboard = () => {
           {stats.map((stat, i) => (
             <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-transparent hover:border-green-fresh transition-all group">
               <span className="text-2xl mb-4 block">{stat.icon}</span>
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">{stat.label}</p>
+              <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">{stat.label}</p>
               <h3 className="text-2xl font-black text-green-deep mb-2">{stat.value}</h3>
               <span className="text-xs text-green-mid font-bold">{stat.trend}</span>
             </div>
@@ -757,13 +757,13 @@ const FarmerDashboard = () => {
                                 <span className="text-xl">💰</span>
                                 <div>
                                     <p className="text-sm font-bold text-green-deep">Received order for {order.product?.name}</p>
-                                    <p className="text-[10px] text-gray-400 uppercase font-black">{new Date(order.created_at).toLocaleDateString()}</p>
+                                    <p className="text-[10px] text-gray-600 uppercase font-black">{new Date(order.created_at).toLocaleDateString()}</p>
                                 </div>
                             </div>
                             <span className="bg-amber/20 text-amber px-3 py-1 rounded-full text-[10px] font-black uppercase">{order.status}</span>
                         </div>
                     ))}
-                    {orders.length === 0 && <p className="text-center py-20 text-gray-400 italic">No activity yet. Your fields are quiet!</p>}
+                    {orders.length === 0 && <p className="text-center py-20 text-gray-600 italic">No activity yet. Your fields are quiet!</p>}
                 </div>
             </section>
           </>
@@ -778,7 +778,7 @@ const FarmerDashboard = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {products.map(p => (
                         <div key={p.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-cream-dark hover:shadow-xl transition-all group">
-                             <div className="h-56 bg-cream overflow-hidden relative group/img cursor-zoom-in" onClick={() => setLightbox({ show: true, images: [p.image_url_1, p.image_url_2].filter(Boolean), index: 0, productName: p.name })}>
+                             <div className="h-56 bg-cream overflow-hidden relative group/img cursor-zoom-in" role="button" tabIndex={0} aria-label={`View photos of ${p.name}`} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightbox({ show: true, images: [p.image_url_1, p.image_url_2].filter(Boolean), index: 0, productName: p.name }); } }} onClick={() => setLightbox({ show: true, images: [p.image_url_1, p.image_url_2].filter(Boolean), index: 0, productName: p.name })}>
                                  <img src={p.image_url_1} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={p.name} />
                                  {p.image_url_2 && (
                                      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 bg-black/20 backdrop-blur-md px-3 py-1.5 rounded-full ring-1 ring-white/20">
@@ -796,7 +796,7 @@ const FarmerDashboard = () => {
                             <div className="p-5 text-left">
                                 <h3 className="font-bold text-green-deep text-lg mb-1">{p.name}</h3>
                                 <div className="flex justify-between items-baseline">
-                                    <p className="text-xl font-black text-green-deep">₹{p.user_price}<span className="text-xs font-medium text-gray-400">/{p.unit}</span></p>
+                                    <p className="text-xl font-black text-green-deep">₹{p.user_price}<span className="text-xs font-medium text-gray-600">/{p.unit}</span></p>
                                     <p className="text-[10px] font-black text-green-mid uppercase">{p.quantity} {p.unit} available</p>
                                 </div>
                                 <div className="text-[10px] font-black text-amber uppercase mt-2 flex items-center gap-1">
@@ -820,14 +820,14 @@ const FarmerDashboard = () => {
 
                                 <div className="mt-3 flex justify-between items-center opacity-40">
                                     <span className="text-[10px] font-black text-green-mid uppercase">Live in Market</span>
-                                    <span className="text-[10px] font-bold text-gray-400">ID: {p.id.slice(0, 8)}</span>
+                                    <span className="text-[10px] font-bold text-gray-600">ID: {p.id.slice(0, 8)}</span>
                                 </div>
                             </div>
                         </div>
                     ))}
                     {products.length === 0 && (
                         <div className="col-span-full py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
-                            <p className="text-gray-400 font-bold italic mb-4 text-xl">Your field is empty...</p>
+                            <p className="text-gray-600 font-bold italic mb-4 text-xl">Your field is empty...</p>
                             <button onClick={() => setShowAddModal(true)} className="bg-amber text-green-deep px-8 py-3 rounded-2xl font-black text-sm shadow-xl hover:scale-105 active:scale-95 transition-all uppercase tracking-widest">+ List First Product</button>
                         </div>
                     )}
@@ -853,15 +853,15 @@ const FarmerDashboard = () => {
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                             <div>
-                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Deliveries</p>
+                                <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Deliveries</p>
                                 <p className="text-2xl font-black text-green-deep">{passportStats.deliveries ?? 0}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">On-time rate</p>
+                                <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">On-time rate</p>
                                 <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.on_time_rate)}</p>
                             </div>
                             <div>
-                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
+                                <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
                                 <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.dispute_rate)}</p>
                             </div>
                         </div>
@@ -873,22 +873,22 @@ const FarmerDashboard = () => {
                         <h3 className="font-playfair text-xl font-bold text-green-deep mb-6">New crop passport</h3>
                         <form onSubmit={handleCreatePassport} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="md:col-span-2">
-                                <label className="text-xs font-bold uppercase text-gray-400">Product</label>
-                                <select required className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.product_id} onChange={e => setPassportForm({ ...passportForm, product_id: e.target.value })}>
+                                <label className="text-xs font-bold uppercase text-gray-600" htmlFor="product">Product</label>
+                                <select id="product" required className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.product_id} onChange={e => setPassportForm({ ...passportForm, product_id: e.target.value })}>
                                     <option value="">Select a product...</option>
                                     {passportableProducts.map(p => (
                                         <option key={p.id} value={p.id}>{p.name}</option>
                                     ))}
                                 </select>
                             </div>
-                            <div><label className="text-xs font-bold uppercase text-gray-400">Crop</label><input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={passportForm.crop} onChange={e => setPassportForm({ ...passportForm, crop: e.target.value })} /></div>
-                            <div><label className="text-xs font-bold uppercase text-gray-400">Variety</label><input className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Basmati..." value={passportForm.variety} onChange={e => setPassportForm({ ...passportForm, variety: e.target.value })} /></div>
-                            <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.quantity} onChange={e => setPassportForm({ ...passportForm, quantity: e.target.value })} /></div>
-                            <div><label className="text-xs font-bold uppercase text-gray-400">Unit</label><select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.unit} onChange={e => setPassportForm({ ...passportForm, unit: e.target.value })}><option>kg</option><option>quintal</option></select></div>
-                            <div><label className="text-xs font-bold uppercase text-gray-400">Harvest date</label><input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.harvest_date} onChange={e => setPassportForm({ ...passportForm, harvest_date: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-600" htmlFor="crop">Crop</label><input id="crop" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={passportForm.crop} onChange={e => setPassportForm({ ...passportForm, crop: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-600" htmlFor="variety">Variety</label><input id="variety" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Basmati..." value={passportForm.variety} onChange={e => setPassportForm({ ...passportForm, variety: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-600" htmlFor="quantity">Quantity</label><input id="quantity" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.quantity} onChange={e => setPassportForm({ ...passportForm, quantity: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-600" htmlFor="unit">Unit</label><select id="unit" className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.unit} onChange={e => setPassportForm({ ...passportForm, unit: e.target.value })}><option>kg</option><option>quintal</option></select></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-600" htmlFor="harvest-date">Harvest date</label><input id="harvest-date" required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.harvest_date} onChange={e => setPassportForm({ ...passportForm, harvest_date: e.target.value })} /></div>
                             <div>
-                                <label className="text-xs font-bold uppercase text-gray-400">Quality grade</label>
-                                <select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.quality_grade} onChange={e => setPassportForm({ ...passportForm, quality_grade: e.target.value })}>
+                                <label className="text-xs font-bold uppercase text-gray-600" htmlFor="quality-grade">Quality grade</label>
+                                <select id="quality-grade" className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.quality_grade} onChange={e => setPassportForm({ ...passportForm, quality_grade: e.target.value })}>
                                     <option value="A">A</option>
                                     <option value="B">B</option>
                                     <option value="C">C</option>
@@ -896,11 +896,11 @@ const FarmerDashboard = () => {
                                 </select>
                             </div>
                             <div className="md:col-span-2">
-                                <label className="text-xs font-bold uppercase text-gray-400">Photos (up to 5)</label>
-                                <input type="file" multiple accept="image/*" className="w-full bg-cream rounded-xl p-4 mt-1" onChange={e => setPassportPhotos(Array.from(e.target.files || []).slice(0, 5))} />
+                                <label className="text-xs font-bold uppercase text-gray-600" htmlFor="photos">Photos (up to 5)</label>
+                                <input id="photos" type="file" multiple accept="image/*" className="w-full bg-cream rounded-xl p-4 mt-1" onChange={e => setPassportPhotos(Array.from(e.target.files || []).slice(0, 5))} />
                                 {passportPhotos.length > 0 && <p className="text-xs text-gray-500 mt-2">{passportPhotos.length} photo{passportPhotos.length > 1 ? 's' : ''} selected</p>}
                             </div>
-                            {passportFormError && <p className="md:col-span-2 text-sm text-red-600">{passportFormError}</p>}
+                            {passportFormError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{passportFormError}</p>}
                             <button type="submit" disabled={passportSaving} className="md:col-span-2 bg-green-fresh text-white font-black py-4 rounded-xl disabled:opacity-50">
                                 {passportSaving ? 'Creating...' : 'Create Passport'}
                             </button>
@@ -909,13 +909,13 @@ const FarmerDashboard = () => {
                 )}
 
                 {passportsLoading ? (
-                    <p className="text-center py-10 text-gray-400 italic">Loading your passports...</p>
+                    <p className="text-center py-10 text-gray-600 italic">Loading your passports...</p>
                 ) : passportError ? (
-                    <p className="text-center py-10 text-red-600">{passportError}</p>
+                    <p aria-live="polite" className="text-center py-10 text-red-600">{passportError}</p>
                 ) : passports.length === 0 ? (
                     <div className="py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
-                        <p className="text-gray-400 font-bold italic mb-4 text-xl">No crop passports yet.</p>
-                        <p className="text-gray-400 text-sm">Create one for a product to show buyers where their food comes from.</p>
+                        <p className="text-gray-600 font-bold italic mb-4 text-xl">No crop passports yet.</p>
+                        <p className="text-gray-600 text-sm">Create one for a product to show buyers where their food comes from.</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -931,7 +931,7 @@ const FarmerDashboard = () => {
             <div className="bg-white rounded-3xl shadow-sm border border-cream-dark overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-cream/50 text-[10px] font-black uppercase text-gray-400">
+                        <thead className="bg-cream/50 text-[10px] font-black uppercase text-gray-600">
                             <tr>
                                 <th className="p-6">Product</th>
                                 <th className="p-6">Buyer</th>
@@ -945,13 +945,13 @@ const FarmerDashboard = () => {
                                 <tr key={order.id} className="hover:bg-cream/5 transition-colors">
                                     <td className="p-6">
                                         <p className="text-sm font-black text-green-deep">{order.product?.name}</p>
-                                        <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">Order Quantity: <span className="text-amber">{order.quantity} {order.unit_at_order || order.product?.unit}</span></p>
+                                        <p className="text-[10px] text-gray-600 font-bold uppercase mt-0.5">Order Quantity: <span className="text-amber">{order.quantity} {order.unit_at_order || order.product?.unit}</span></p>
                                     </td>
                                     <td className="p-6">
                                         <div className="flex flex-col gap-1">
                                             <p className="text-sm font-bold text-green-deep uppercase tracking-tighter">👤 {order.buyer_name || 'Buyer'}</p>
                                             <div className="flex flex-col">
-                                                <p className="text-[10px] text-gray-400 font-bold uppercase">🏠 TO: {order.delivery_address || 'Profile Location'}</p>
+                                                <p className="text-[10px] text-gray-600 font-bold uppercase">🏠 TO: {order.delivery_address || 'Profile Location'}</p>
                                                 <p className="text-[10px] text-green-fresh font-black tracking-widest mt-0.5">📞 {order.buyer_phone || 'No Phone'}</p>
                                             </div>
                                         </div>
@@ -1034,7 +1034,7 @@ const FarmerDashboard = () => {
                                 </tr>
                             ))}
                             {orders.length === 0 && (
-                                <tr><td colSpan="5" className="p-20 text-center text-gray-400 italic">No sales yet.</td></tr>
+                                <tr><td colSpan="5" className="p-20 text-center text-gray-600 italic">No sales yet.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -1060,7 +1060,7 @@ const FarmerDashboard = () => {
                   {/* Top Level KPIs */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       <div className="bg-white p-8 rounded-[32px] shadow-sm border border-cream-dark group hover:border-green-fresh transition-all">
-                          <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-2">Net Sales</p>
+                          <p className="text-[10px] font-black uppercase text-gray-600 tracking-widest mb-2">Net Sales</p>
                           <h3 className="text-4xl font-black text-green-deep">₹{totalRevenue}</h3>
                           <div className="mt-4 flex items-center gap-2">
                               <span className="text-green-fresh font-black text-xs">↑ 12%</span>
@@ -1068,7 +1068,7 @@ const FarmerDashboard = () => {
                           </div>
                       </div>
                       <div className="bg-white p-8 rounded-[32px] shadow-sm border border-cream-dark group hover:border-amber transition-all">
-                          <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-2">Avg Order</p>
+                          <p className="text-[10px] font-black uppercase text-gray-600 tracking-widest mb-2">Avg Order</p>
                           <h3 className="text-4xl font-black text-green-deep">₹{avgOrderValue}</h3>
                           <div className="mt-4 flex items-center gap-2">
                               <span className="text-amber font-black text-xs">⭐ High Value</span>
@@ -1076,7 +1076,7 @@ const FarmerDashboard = () => {
                           </div>
                       </div>
                       <div className="bg-white p-8 rounded-[32px] shadow-sm border border-cream-dark group hover:border-red-400 transition-all">
-                          <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-2">Inquiry Lost</p>
+                          <p className="text-[10px] font-black uppercase text-gray-600 tracking-widest mb-2">Inquiry Lost</p>
                           <h3 className="text-4xl font-black text-red-400">{rejectionRate}%</h3>
                           <div className="mt-4 flex items-center gap-2">
                               <span className="text-[10px] font-bold text-gray-300 uppercase">Rejection benchmark</span>
@@ -1100,7 +1100,7 @@ const FarmerDashboard = () => {
                                             style={{ height: `${h}%` }}
                                           ></div>
                                       </div>
-                                      <span className="text-[8px] font-black uppercase text-gray-400">Day {i+1}</span>
+                                      <span className="text-[8px] font-black uppercase text-gray-600">Day {i+1}</span>
                                   </div>
                               ))}
                           </div>
@@ -1187,14 +1187,14 @@ const FarmerDashboard = () => {
                     <div className="w-full mt-10 space-y-4 border-t border-cream-dark pt-8 text-left">
                         <div className="flex justify-between items-center bg-cream/30 p-3 rounded-xl border border-cream-dark/50">
                             <div>
-                                <p className="text-[10px] font-black uppercase text-gray-400">Farm Location</p>
+                                <p className="text-[10px] font-black uppercase text-gray-600">Farm Location</p>
                                 <p className="text-sm font-bold text-green-fresh">{profile?.latitude ? '📍 Geo-Tagged' : '⚠ Missing Geotag'}</p>
                             </div>
                             <button onClick={() => setShowLocationModal(true)} className="text-xs font-black uppercase text-amber hover:underline">Update</button>
                         </div>
                         <div className="flex justify-between items-center bg-cream/30 p-3 rounded-xl border border-cream-dark/50">
                             <div>
-                                <p className="text-[10px] font-black uppercase text-gray-400">Public Contact</p>
+                                <p className="text-[10px] font-black uppercase text-gray-600">Public Contact</p>
                                 <p className={`text-sm font-bold ${profile?.phone_number ? 'text-green-fresh' : 'text-red-400 animate-pulse'}`}>
                                     {profile?.phone_number ? `📞 ${profile.phone_number}` : '⚠ Missing Phone'}
                                 </p>
@@ -1232,24 +1232,24 @@ const FarmerDashboard = () => {
                     }}>
                         <div className="grid grid-cols-2 gap-6">
                             <div className="space-y-1.5 text-left">
-                                <label className="text-[10px] font-black uppercase text-gray-400 ml-1 tracking-widest">First Name</label>
-                                <input name="first_name" defaultValue={profile?.first_name} className="w-full bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
+                                <label className="text-[10px] font-black uppercase text-gray-600 ml-1 tracking-widest" htmlFor="first-name">First Name</label>
+                                <input id="first-name" name="first_name" defaultValue={profile?.first_name} className="w-full bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
                             </div>
                             <div className="space-y-1.5 text-left">
-                                <label className="text-[10px] font-black uppercase text-gray-400 ml-1 tracking-widest">Last Name</label>
-                                <input name="last_name" defaultValue={profile?.last_name} className="w-full bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
+                                <label className="text-[10px] font-black uppercase text-gray-600 ml-1 tracking-widest" htmlFor="last-name">Last Name</label>
+                                <input id="last-name" name="last_name" defaultValue={profile?.last_name} className="w-full bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
                             </div>
                         </div>
                         <div className="space-y-1.5 text-left">
-                             <label className="text-[10px] font-black uppercase text-gray-400 ml-1 tracking-widest">Business Phone Number</label>
+                             <label className="text-[10px] font-black uppercase text-gray-600 ml-1 tracking-widest" htmlFor="business-phone">Business Phone Number</label>
                              <div className="flex gap-2">
-                                <span className="bg-cream/50 rounded-2xl px-4 py-3 text-sm font-bold text-gray-400 border border-transparent">+91</span>
-                                <input name="phone_number" defaultValue={profile?.phone_number} placeholder="10-digit mobile number" className="flex-1 bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
+                                <span className="bg-cream/50 rounded-2xl px-4 py-3 text-sm font-bold text-gray-600 border border-transparent">+91</span>
+                                <input id="business-phone" name="phone_number" defaultValue={profile?.phone_number} placeholder="10-digit mobile number" className="flex-1 bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
                              </div>
                         </div>
                         <div className="space-y-1.5 text-left">
-                            <label className="text-[10px] font-black uppercase text-gray-400 ml-1 tracking-widest">Farm/Home Address</label>
-                            <textarea name="address" defaultValue={profile?.address} placeholder="Mention Farm Location, Pincode, State..." className="w-full bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-4 rounded-2xl outline-none transition-all font-bold min-h-[120px] resize-none" />
+                            <label className="text-[10px] font-black uppercase text-gray-600 ml-1 tracking-widest" htmlFor="farm-home-address">Farm/Home Address</label>
+                            <textarea id="farm-home-address" name="address" defaultValue={profile?.address} placeholder="Mention Farm Location, Pincode, State..." className="w-full bg-cream/50 border border-transparent focus:border-green-fresh focus:bg-white px-5 py-4 rounded-2xl outline-none transition-all font-bold min-h-[120px] resize-none" />
                         </div>
                         <div className="flex gap-4">
                             <button className="bg-green-deep text-white px-10 py-4 rounded-2xl font-black text-sm shadow-xl hover:scale-105 active:scale-95 transition-all">
@@ -1268,12 +1268,12 @@ const FarmerDashboard = () => {
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-cream-dark">
                 <h2 className="font-playfair text-2xl font-black text-green-deep">Income Tracker 💸</h2>
-                <p className="text-gray-400 text-sm font-bold">Track verified payments and completed orders.</p>
+                <p className="text-gray-600 text-sm font-bold">Track verified payments and completed orders.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-6">
                 {orders.filter(o => o.status === 'PAID' || o.status === 'COMPLETED' || o.status === 'SHIPPED').length === 0 ? (
-                    <div className="py-20 text-center bg-white rounded-3xl border border-cream-dark text-gray-400 font-bold italic">
+                    <div className="py-20 text-center bg-white rounded-3xl border border-cream-dark text-gray-600 font-bold italic">
                         No secured payments to track yet. Sell more crops! 🌾
                     </div>
                 ) : (
@@ -1284,7 +1284,7 @@ const FarmerDashboard = () => {
                                     <div className="w-16 h-16 bg-cream rounded-2xl flex items-center justify-center text-3xl shadow-inner">📦</div>
                                     <div>
                                         <h4 className="text-lg font-black text-green-deep">{order.product?.name}</h4>
-                                        <p className="text-[10px] text-gray-400 font-black uppercase">Buyer: {order.buyer_name || 'Buyer'} · <span className="text-green-fresh">₹{order.total_price}</span></p>
+                                        <p className="text-[10px] text-gray-600 font-black uppercase">Buyer: {order.buyer_name || 'Buyer'} · <span className="text-green-fresh">₹{order.total_price}</span></p>
                                     </div>
                                 </div>
 
@@ -1319,12 +1319,12 @@ const FarmerDashboard = () => {
                                 </div>
 
                                 <div className="bg-cream/30 p-6 rounded-[24px] text-center lg:text-right min-w-[220px]">
-                                    <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-tighter">Current Money Status</p>
+                                    <p className="text-[10px] font-black text-gray-600 uppercase mb-1 tracking-tighter">Current Money Status</p>
                                     <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'text-green-fresh' : 'text-amber'}`}>
                                         {(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
                                     </p>
                                     {order.status !== 'COMPLETED' && order.status !== 'DELIVERED' && (
-                                        <p className="text-[9px] text-gray-400 italic mt-2">Automatic farmer payouts are not configured yet.</p>
+                                        <p className="text-[9px] text-gray-600 italic mt-2">Automatic farmer payouts are not configured yet.</p>
                                     )}
                                 </div>
                             </div>
@@ -1416,17 +1416,18 @@ const FarmerDashboard = () => {
               <div className="bg-white w-full max-w-2xl rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
                   <div className="bg-green-deep p-6 text-white flex justify-between items-center">
                       <h2 className="text-2xl font-playfair font-black">{editingProduct ? 'Edit Harvest' : 'List New Crop'}</h2>
-                      <button onClick={() => { setShowAddModal(false); resetForm(); }} className="text-white/40 hover:text-white text-2xl">×</button>
+                      <button onClick={() => { setShowAddModal(false); resetForm(); }} aria-label="Close listing form" className="text-white/40 hover:text-white text-2xl">×</button>
                   </div>
                   <form onSubmit={handlePublishProduct} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto max-h-[70vh]">
-                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Crop Name</label><input required className="w-full bg-cream rounded-xl p-4 mt-1 border" placeholder="Wheat..." value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-                      <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" min="1" step="1" className="w-full bg-cream rounded-xl p-4 mt-1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} /></div>
-                      <div><label className="text-xs font-bold uppercase text-gray-400">Unit</label><select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})}><option>kg</option><option>quintal</option></select></div>
+                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-600" htmlFor="crop-name">Crop Name</label><input id="crop-name" required className="w-full bg-cream rounded-xl p-4 mt-1 border" placeholder="Wheat..." value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+                      <div><label className="text-xs font-bold uppercase text-gray-600" htmlFor="quantity-2">Quantity</label><input id="quantity-2" required type="number" min="1" step="1" className="w-full bg-cream rounded-xl p-4 mt-1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} /></div>
+                      <div><label className="text-xs font-bold uppercase text-gray-600" htmlFor="unit-2">Unit</label><select id="unit-2" className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})}><option>kg</option><option>quintal</option></select></div>
                       <div className="md:col-span-2">
-                        <label className="text-xs font-bold uppercase text-gray-400 font-black tracking-widest">Crop Category</label>
+                        <label className="text-xs font-bold uppercase text-gray-600 font-black tracking-widest" htmlFor="crop-category">Crop Category</label>
                         <div className="relative group">
                           <input 
                               required 
+                              id="crop-category"
                               list="category-suggestions"
                               className="w-full bg-cream rounded-xl p-4 mt-2 border-2 border-transparent focus:border-green-fresh outline-none font-bold text-sm transition-all"
                               placeholder="🌾 Select or type a category (e.g., Basmati Rice, Organic Kale...)"
@@ -1452,16 +1453,16 @@ const FarmerDashboard = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Selling Price</label><input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1 border-2 border-green-fresh" placeholder="₹" value={formData.user_price} onChange={e => setFormData({...formData, user_price: e.target.value})} /></div>
-                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-400">Harvest Address</label><textarea required className="w-full bg-cream rounded-xl p-4 mt-1 border min-h-[80px]" placeholder="Specific field location, village, or warehouse address..." value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
+                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-600" htmlFor="selling-price">Selling Price</label><input id="selling-price" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1 border-2 border-green-fresh" placeholder="₹" value={formData.user_price} onChange={e => setFormData({...formData, user_price: e.target.value})} /></div>
+                      <div className="md:col-span-2"><label className="text-xs font-bold uppercase text-gray-600" htmlFor="harvest-address">Harvest Address</label><textarea id="harvest-address" required className="w-full bg-cream rounded-xl p-4 mt-1 border min-h-[80px]" placeholder="Specific field location, village, or warehouse address..." value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
                       <div className="md:col-span-2 grid grid-cols-2 gap-4">
-                          <label className="col-span-2 text-xs font-bold uppercase text-gray-400">Crop Photos {editingProduct && '(Leave empty to keep current)'}</label>
+                          <label className="col-span-2 text-xs font-bold uppercase text-gray-600" htmlFor="crop-photo-1">Crop Photos {editingProduct && '(Leave empty to keep current)'}</label>
                           <div className="relative group">
-                              <input type="file" onChange={e => handlePhotoChange(e, 1)} className="text-[10px] w-full" />
+                              <input id="crop-photo-1" type="file" onChange={e => handlePhotoChange(e, 1)} className="text-[10px] w-full" />
                               {preview1 && <img src={preview1} className="mt-2 w-16 h-16 rounded-lg object-cover border" />}
                           </div>
                           <div className="relative group">
-                              <input type="file" onChange={e => handlePhotoChange(e, 2)} className="text-[10px] w-full" />
+                              <input id="crop-photo-2" aria-label="Crop photo 2" type="file" onChange={e => handlePhotoChange(e, 2)} className="text-[10px] w-full" />
                               {preview2 && <img src={preview2} className="mt-2 w-16 h-16 rounded-lg object-cover border" />}
                           </div>
                       </div>
@@ -1612,7 +1613,7 @@ const FarmerDashboard = () => {
                          Track Money Safety →
                       </button>
                   </div>
-                  <button onClick={() => setEscrowNotification({ show: false, orderId: null, amount: 0 })} className="text-gray-300 hover:text-red-400 text-xl font-bold">×</button>
+                  <button onClick={() => setEscrowNotification({ show: false, orderId: null, amount: 0 })} aria-label="Dismiss notification" className="text-gray-300 hover:text-red-400 text-xl font-bold">×</button>
               </div>
           </div>
       )}
@@ -1640,6 +1641,7 @@ const FarmerDashboard = () => {
           <div className="fixed inset-0 z-[600] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-4 lg:p-10 animate-in fade-in duration-300">
               <button 
                   onClick={() => setLightbox(prev => ({ ...prev, show: false }))}
+                  aria-label="Close image viewer"
                   className="absolute top-8 right-8 text-white/40 hover:text-white text-4xl font-light transition-all hover:rotate-90 z-[610]"
               >
                   ×
@@ -1693,7 +1695,7 @@ const FarmerDashboard = () => {
               <div className="bg-white w-full max-w-2xl rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
                   <div className="bg-green-deep p-6 text-white flex justify-between items-center">
                       <h2 className="text-2xl font-playfair font-black">Book Delivery</h2>
-                      <button onClick={() => setShipOrderId(null)} className="text-white/40 hover:text-white text-2xl">×</button>
+                      <button onClick={() => setShipOrderId(null)} aria-label="Close delivery booking" className="text-white/40 hover:text-white text-2xl">×</button>
                   </div>
                   <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
                       {shipBookedId ? (
@@ -1704,12 +1706,12 @@ const FarmerDashboard = () => {
                       ) : (
                           <>
                               {shipLoading ? (
-                                  <p className="text-center py-10 text-gray-400 italic">Loading transporters...</p>
+                                  <p className="text-center py-10 text-gray-600 italic">Loading transporters...</p>
                               ) : shipTransporters.length === 0 ? (
                                   <p className="text-gray-500 font-medium py-10 text-center">No verified transporters available. Ship it yourself below.</p>
                               ) : (
                                   <div className="space-y-3">
-                                      <p className="text-xs font-bold uppercase text-gray-400">Pick a transporter</p>
+                                      <p className="text-xs font-bold uppercase text-gray-600">Pick a transporter</p>
                                       {shipTransporters.map((t) => (
                                           <label key={t.id} className="flex items-center gap-3 bg-cream rounded-xl p-4 cursor-pointer">
                                               <input
@@ -1743,12 +1745,12 @@ const FarmerDashboard = () => {
                                       </p>
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                                           <div>
-                                              <label className="text-xs font-bold uppercase text-gray-400">Delivery window start</label>
-                                              <input type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowStart} onChange={(e) => setShipWindowStart(e.target.value)} />
+                                              <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-window-start">Delivery window start</label>
+                                              <input id="delivery-window-start" type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowStart} onChange={(e) => setShipWindowStart(e.target.value)} />
                                           </div>
                                           <div>
-                                              <label className="text-xs font-bold uppercase text-gray-400">Delivery window end</label>
-                                              <input type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowEnd} onChange={(e) => setShipWindowEnd(e.target.value)} />
+                                              <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-window-end">Delivery window end</label>
+                                              <input id="delivery-window-end" type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowEnd} onChange={(e) => setShipWindowEnd(e.target.value)} />
                                           </div>
                                       </div>
                                       <button
@@ -1760,7 +1762,7 @@ const FarmerDashboard = () => {
                                       </button>
                                   </div>
                               )}
-                              {shipError && <p className="text-sm text-red-600">{shipError}</p>}
+                              {shipError && <p aria-live="polite" className="text-sm text-red-600">{shipError}</p>}
                               <div className="border-t border-cream-dark pt-4">
                                   <p className="text-sm text-gray-500 mb-3">Delivering it yourself instead?</p>
                                   <button

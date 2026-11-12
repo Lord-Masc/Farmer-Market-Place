@@ -170,11 +170,11 @@ const DisputeDetail = () => {
       <Navbar />
       <main className="pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
         {loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading dispute...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading dispute...</p>
         ) : notFound ? (
           <p className="py-20 text-center text-gray-500 font-medium">Dispute not found or you don&apos;t have access.</p>
         ) : error ? (
-          <p className="py-20 text-center text-red-600">{error}</p>
+          <p aria-live="polite" className="py-20 text-center text-red-600">{error}</p>
         ) : (
           <>
             <header className="mb-10">
@@ -195,7 +195,7 @@ const DisputeDetail = () => {
               <div className="flex flex-wrap items-center gap-2">
                 {STEPS.map((step, i) => (
                   <React.Fragment key={step}>
-                    <span className={`px-4 py-2 rounded-full text-[10px] font-black uppercase ${i < currentStep ? 'bg-green-fresh text-white' : i === currentStep ? 'bg-green-deep text-white shadow-lg' : 'bg-cream text-gray-400'}`}>
+                    <span className={`px-4 py-2 rounded-full text-[10px] font-black uppercase ${i < currentStep ? 'bg-green-fresh text-white' : i === currentStep ? 'bg-green-deep text-white shadow-lg' : 'bg-cream text-gray-600'}`}>
                       {i < currentStep ? '✓ ' : ''}{STEP_LABELS[step]}
                     </span>
                     {i < STEPS.length - 1 && <span className="text-gray-300">→</span>}
@@ -253,6 +253,7 @@ const DisputeDetail = () => {
                 <form onSubmit={handleEvidence} className="flex flex-col sm:flex-row gap-3">
                   <input
                     type="file" accept="image/*"
+                    aria-label="Dispute evidence file"
                     className="flex-1 bg-cream rounded-xl p-4"
                     onChange={(e) => setEvidenceFile(e.target.files?.[0] || null)}
                   />
@@ -261,7 +262,7 @@ const DisputeDetail = () => {
                   </button>
                 </form>
               )}
-              {evidenceError && <p className="text-sm text-red-600 mt-3">{evidenceError}</p>}
+              {evidenceError && <p aria-live="polite" className="text-sm text-red-600 mt-3">{evidenceError}</p>}
             </section>
 
             <section className="bg-white rounded-[24px] p-6 shadow-sm mb-10">
@@ -272,7 +273,7 @@ const DisputeDetail = () => {
                 <div className="space-y-4 mb-6">
                   {messages.map((m) => (
                     <div key={m.id} className="bg-cream/50 rounded-[20px] p-4">
-                      <p className="text-xs font-black uppercase text-gray-400 mb-1">
+                      <p className="text-xs font-black uppercase text-gray-600 mb-1">
                         {m.author_role || 'User'} · {formatDateTime(m.created_at)}
                       </p>
                       <p className="text-sm text-[#4a4a4a]">{m.body}</p>
@@ -284,6 +285,7 @@ const DisputeDetail = () => {
                 <form onSubmit={handleMessage} className="flex flex-col sm:flex-row gap-3">
                   <input
                     className="flex-1 bg-cream rounded-xl p-4"
+                    aria-label="Write a message to the dispute thread"
                     placeholder="Write a message…"
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
@@ -293,7 +295,7 @@ const DisputeDetail = () => {
                   </button>
                 </form>
               )}
-              {messageError && <p className="text-sm text-red-600 mt-3">{messageError}</p>}
+              {messageError && <p aria-live="polite" className="text-sm text-red-600 mt-3">{messageError}</p>}
               {isResolved && <p className="text-sm text-gray-500 mt-3">This dispute is resolved — the thread is closed.</p>}
             </section>
 
@@ -311,8 +313,8 @@ const DisputeDetail = () => {
                 )}
                 <form onSubmit={handleResolve} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Outcome</label>
-                    <select required className="w-full bg-cream rounded-xl p-4 mt-1" value={resolveForm.outcome} onChange={(e) => setResolveForm({ ...resolveForm, outcome: e.target.value })}>
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="outcome">Outcome</label>
+                    <select id="outcome" required className="w-full bg-cream rounded-xl p-4 mt-1" value={resolveForm.outcome} onChange={(e) => setResolveForm({ ...resolveForm, outcome: e.target.value })}>
                       <option value="">Choose an outcome…</option>
                       {OUTCOMES.map((o) => (
                         <option key={o} value={o}>{o.replace('_', ' ')}</option>
@@ -321,17 +323,17 @@ const DisputeDetail = () => {
                   </div>
                   {resolveForm.outcome === 'partial_refund' && (
                     <div>
-                      <label className="text-xs font-bold uppercase text-gray-400">Refund amount (₹)</label>
-                      <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="e.g. 250" value={resolveForm.amountRupees} onChange={(e) => setResolveForm({ ...resolveForm, amountRupees: e.target.value })} />
+                      <label className="text-xs font-bold uppercase text-gray-600" htmlFor="refund-amount">Refund amount (₹)</label>
+                      <input id="refund-amount" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="e.g. 250" value={resolveForm.amountRupees} onChange={(e) => setResolveForm({ ...resolveForm, amountRupees: e.target.value })} />
                     </div>
                   )}
                   <div className="md:col-span-2">
-                    <label className="text-xs font-bold uppercase text-gray-400">
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="resolve-note">
                       Note{resolveForm.outcome === 'rejected' ? ' (required for a rejection)' : ''}
                     </label>
-                    <textarea rows={3} className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Why this outcome…" value={resolveForm.note} onChange={(e) => setResolveForm({ ...resolveForm, note: e.target.value })} />
+                    <textarea id="resolve-note" rows={3} className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Why this outcome…" value={resolveForm.note} onChange={(e) => setResolveForm({ ...resolveForm, note: e.target.value })} />
                   </div>
-                  {adminError && <p className="md:col-span-2 text-sm text-red-600">{adminError}</p>}
+                  {adminError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{adminError}</p>}
                   <button type="submit" disabled={adminBusy} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {adminBusy ? 'Resolving...' : 'Resolve Dispute'}
                   </button>

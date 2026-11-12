@@ -84,20 +84,20 @@ const FarmerProfile = () => {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                   <div>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Deliveries</p>
+                    <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Deliveries</p>
                     <p className="text-2xl font-black text-green-deep">{stats.deliveries ?? 0}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">On-time rate</p>
+                    <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">On-time rate</p>
                     <p className="text-2xl font-black text-green-deep">{formatRate(stats.on_time_rate)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
+                    <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
                     <p className="text-2xl font-black text-green-deep">{formatRate(stats.refund_rate ?? stats.dispute_rate)}</p>
                   </div>
                   {realDisputeCount > 0 && (
                     <div>
-                      <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Dispute rate (real disputes)</p>
+                      <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Dispute rate (real disputes)</p>
                       <p className="text-2xl font-black text-green-deep">{formatRate(realDisputeRate)}</p>
                       <p className="text-xs text-gray-500 mt-1">{realDisputeCount} dispute{realDisputeCount === 1 ? '' : 's'}</p>
                     </div>
