@@ -8,6 +8,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const verificationRoutes = require('./routes/verificationRoutes');
 const passportRoutes = require('./routes/passportRoutes');
 const negotiationRoutes = require('./routes/negotiationRoutes');
+const groupBuyRoutes = require('./routes/groupBuyRoutes');
 const cron = require('node-cron');
 const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
 const { reconcileUnpaidOrders } = require('./jobs/reconcile');
@@ -49,6 +50,7 @@ app.use('/api/admin', rateLimit({ max: 100 }), adminRoutes); // Admin review + r
 app.use('/api/verification', rateLimit({ max: 60 }), verificationRoutes); // Farmer verification submit (Stage 1)
 app.use('/api', rateLimit({ max: 60 }), passportRoutes); // Crop passports (Stage 2, module A)
 app.use('/api', rateLimit({ max: 60 }), negotiationRoutes); // Negotiation (Stage 4, module C)
+app.use('/api/group-buys', rateLimit({ max: 60 }), groupBuyRoutes); // Smart group selling (Stage 5, module D)
 
 // Health Check
 app.get('/health', (req, res) => {
