@@ -14,6 +14,7 @@ const transporterRoutes = require('./routes/transporterRoutes');
 const disputeRoutes = require('./routes/disputeRoutes');
 const assistantRoutes = require('./routes/assistantRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const transparencyRoutes = require('./routes/transparencyRoutes');
 const cron = require('node-cron');
 const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
 const { reconcileUnpaidOrders } = require('./jobs/reconcile');
@@ -62,6 +63,7 @@ app.use('/api/transporters', rateLimit({ max: 60 }), transporterRoutes); // Tran
 app.use('/api', rateLimit({ max: 60 }), disputeRoutes); // Disputes & trust (Stage 7, module F)
 app.use('/api/assistant', assistantRoutes); // AI farmer assistant (Stage 8, module G; chat 30 / voice 10 limits live on the routes)
 app.use('/api/notifications', notificationRoutes); // Notifications & communication (Stage 9, module H; per-route limits live in the router)
+app.use('/api/transparency', rateLimit({ max: 60 }), transparencyRoutes); // Public transparency dashboard (Stage 10, module I; no auth — aggregated metrics only)
 
 // Health Check
 app.get('/health', (req, res) => {
