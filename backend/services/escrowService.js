@@ -804,6 +804,95 @@ exports.refundOrder = async (order_id) => {
     return processClaimedRefund(order);
 };
 
+// 5c. Partial refund for a dispute resolution (Stage 7). Reuses the
+// Stage 0 gateway idempotency (findExistingGatewayRefund +
+// refundWithIdempotentRetry) and the refunds ledger, but does NOT touch
+// the order status or the payment row: a partial refund is not a full
+// refund, so the order stays PAID/SHIPPED and the payment stays HELD
+// for the remainder. The refunds table has UNIQUE(order_id), so one
+// order holds exactly one refund row: a later FULL refund on an order
+// that already had a partial refund is not supported by this ledger
+// (an admin handles it at the gateway directly).
+// shortcut: the payment row keeps the FULL amount HELD, so a later
+// markOrderAsCompleted releases the un-refunded remainder (the partial
+// amount is the only money returned). Revisit if partial refunds
+// become routine enough to track a remaining-held balance.
+exports.refundPartialOrder = async (order_id, amountPaise) => {
+    if (!Number.isInteger(amountPaise) || amountPaise <= 0) {
+        throw new AppError(422, 'VALIDATION_ERROR', 'amount_paise must be a positive integer.');
+    }
+    const order = await fetchOrder(order_id);
+    const { data: paymentData, error: fetchError } = await supabase
+        .from('payments').select('*').eq('order_id', order_id);
+    if (fetchError) throw fetchError;
+    const payment = getSingle(paymentData);
+    if (!payment) throw new AppError(409, 'REFUND_NOT_ELIGIBLE', 'This order has no payment to refund.');
+    if (!payment.razorpay_payment_id) throw new AppError(409, 'REFUND_NOT_ELIGIBLE', 'No Razorpay payment id stored for this order (cannot refund at gateway).');
+    const paidPaise = Math.round(Number(payment.amount || order.total_price) * 100);
+    if (amountPaise > paidPaise) {
+        throw new AppError(422, 'VALIDATION_ERROR', 'amount_paise cannot exceed the amount paid.');
+    }
+    let gatewayRefundId = null;
+    try {
+        // Pending ledger row FIRST (same as the full path): a retry finds
+        // this row and replays instead of double-refunding.
+        const { data: existing, error: refErr } = await supabase
+            .from('refunds').select('*').eq('order_id', order_id);
+        if (refErr) throw refErr;
+        const existingRefund = getSingle(existing);
+        if (existingRefund && existingRefund.gateway_refund_id) {
+            // Idempotent replay of the SAME partial amount; a different
+            // amount on an already-refunded order is a 409 (one refund
+            // row per order — see header).
+            if (Math.round(Number(existingRefund.amount) * 100) === amountPaise) {
+                return { success: true, message: 'Partial refund already processed', alreadyHandled: true, gateway_refund_id: existingRefund.gateway_refund_id, amount_paise: amountPaise };
+            }
+            throw new AppError(409, 'REFUND_ALREADY_EXISTS', 'This order already has a refund.');
+        }
+        if (!existingRefund) {
+            const { error: pendErr } = await supabase.from('refunds').insert({
+                order_id, gateway_refund_id: null, status: 'PENDING', amount: amountPaise / 100,
+            });
+            if (pendErr) {
+                if (pendErr.code === '23505' || String(pendErr.message || '').includes('duplicate key')) {
+                    const { data: dup, error: dupErr } = await supabase.from('refunds').select('*').eq('order_id', order_id);
+                    if (dupErr) throw dupErr;
+                    const dupRow = getSingle(dup);
+                    if (dupRow && dupRow.gateway_refund_id && Math.round(Number(dupRow.amount) * 100) === amountPaise) {
+                        return { success: true, message: 'Partial refund already processed', alreadyHandled: true, gateway_refund_id: dupRow.gateway_refund_id, amount_paise: amountPaise };
+                    }
+                    throw new AppError(409, 'REFUND_ALREADY_EXISTS', 'This order already has a refund.');
+                }
+                throw pendErr;
+            }
+        }
+        const existingGateway = await findExistingGatewayRefund(payment.razorpay_payment_id, amountPaise);
+        const refund = existingGateway
+            || await refundWithIdempotentRetry(payment.razorpay_payment_id, amountPaise);
+        gatewayRefundId = refund.id;
+        const { data: ledgerRows, error: ledgerErr } = await supabase.from('refunds')
+            .update({ gateway_refund_id: refund.id, status: 'REFUNDED', amount: amountPaise / 100 })
+            .eq('order_id', order_id).select('*');
+        if (ledgerErr) {
+            throw Object.assign(new Error('Refund Failed: ' + ledgerErr.message), { postGateway: true, gateway_refund_id: refund.id });
+        }
+        if (!ledgerRows || ledgerRows.length === 0) {
+            throw Object.assign(new Error('Refund Failed: ledger row missing for order'), { postGateway: true, gateway_refund_id: refund.id });
+        }
+        await logAudit(null, 'order.refunded', { order_id, gateway_refund_id: refund.id, amount_paise: amountPaise, partial: true });
+        return { success: true, message: 'Partial refund processed', gateway_refund_id: refund.id, amount_paise: amountPaise };
+    } catch (err) {
+        if (err instanceof AppError) throw err;
+        if (err && err.postGateway) {
+            throw Object.assign(
+                new Error('Refund Failed: ' + err.message),
+                { postGateway: true, gateway_refund_id: err.gateway_refund_id || gatewayRefundId }
+            );
+        }
+        throw new Error('Refund Failed: ' + err.message);
+    }
+};
+
 // 5b. Reconcile orders stuck in REFUND_RECONCILE: the gateway refund
 // succeeded but a later write failed. Re-read the gateway refund (from the
 // ledger row, or by listing the payment's refunds) and complete the ledger +
