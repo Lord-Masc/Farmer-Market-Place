@@ -12,6 +12,8 @@ import ConfirmedOrders from './pages/ConfirmedOrders';
 import PendingOrders from './pages/PendingOrders';
 import UserProfile from './pages/UserProfile';
 import FarmerProfile from './pages/FarmerProfile';
+import Requirements from './pages/Requirements';
+import NegotiationThread from './pages/NegotiationThread';
 import VerificationQueue from './pages/admin/VerificationQueue';
 import Checkout from './pages/Checkout';
 import EscrowTest from './pages/EscrowTest';
@@ -29,6 +31,8 @@ function App() {
             <Route path="/signup" element={<SignUp />} />
             <Route path="/products" element={<Products />} />
             <Route path="/farmers/:id" element={<FarmerProfile />} />
+            <Route path="/requirements" element={<Requirements />} />
+            <Route path="/negotiations/:id" element={<NegotiationThread />} />
             <Route path="/farmer-dashboard" element={<FarmerDashboard />} />
             <Route path="/buyer-dashboard" element={<BuyerDashboard />} />
             <Route path="/spent-analysis" element={<SpentAnalysis />} />
