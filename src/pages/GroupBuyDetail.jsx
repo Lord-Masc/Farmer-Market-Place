@@ -282,11 +282,11 @@ const GroupBuyDetail = () => {
       <Navbar />
       <main className="pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
         {loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading group buy...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading group buy...</p>
         ) : forbidden ? (
           <p className="py-20 text-center text-gray-500 font-medium">You don&apos;t have access to this page.</p>
         ) : error ? (
-          <p className="py-20 text-center text-red-600">{error}</p>
+          <p aria-live="polite" className="py-20 text-center text-red-600">{error}</p>
         ) : (
           <>
             <header className="mb-10">
@@ -342,15 +342,15 @@ const GroupBuyDetail = () => {
                 <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Join this group buy</h2>
                 <form onSubmit={handleJoin} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Your contribution ({group.unit})</label>
-                    <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="100" value={joinQty} onChange={(e) => setJoinQty(e.target.value)} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="join-contribution">Your contribution ({group.unit})</label>
+                    <input id="join-contribution" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="100" value={joinQty} onChange={(e) => setJoinQty(e.target.value)} />
                   </div>
                   <div className="flex items-end">
                     <button type="submit" disabled={busy} className="w-full bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                       {busy ? 'Joining...' : 'Join Group Buy'}
                     </button>
                   </div>
-                  {joinError && <p className="md:col-span-2 text-sm text-red-600">{joinError}</p>}
+                  {joinError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{joinError}</p>}
                 </form>
               </section>
             )}
@@ -364,22 +364,22 @@ const GroupBuyDetail = () => {
                 <p className="text-sm text-gray-500 mb-6">The threshold is met. Turn the pooled demand into a requirement and negotiate one price for the whole lot.</p>
                 <form onSubmit={handleNegotiate} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Target price (₹)</label>
-                    <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="2500" value={negotiateForm.targetPrice} onChange={(e) => setNegotiateForm({ ...negotiateForm, targetPrice: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="target-price">Target price (₹)</label>
+                    <input id="target-price" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="2500" value={negotiateForm.targetPrice} onChange={(e) => setNegotiateForm({ ...negotiateForm, targetPrice: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Quality (optional)</label>
-                    <input className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Grade A" value={negotiateForm.quality} onChange={(e) => setNegotiateForm({ ...negotiateForm, quality: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="quality">Quality (optional)</label>
+                    <input id="quality" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Grade A" value={negotiateForm.quality} onChange={(e) => setNegotiateForm({ ...negotiateForm, quality: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Delivery window start</label>
-                    <input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={negotiateForm.deliveryWindowStart} onChange={(e) => setNegotiateForm({ ...negotiateForm, deliveryWindowStart: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-window-start">Delivery window start</label>
+                    <input id="delivery-window-start" required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={negotiateForm.deliveryWindowStart} onChange={(e) => setNegotiateForm({ ...negotiateForm, deliveryWindowStart: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Delivery window end</label>
-                    <input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={negotiateForm.deliveryWindowEnd} onChange={(e) => setNegotiateForm({ ...negotiateForm, deliveryWindowEnd: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-window-end">Delivery window end</label>
+                    <input id="delivery-window-end" required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={negotiateForm.deliveryWindowEnd} onChange={(e) => setNegotiateForm({ ...negotiateForm, deliveryWindowEnd: e.target.value })} />
                   </div>
-                  {negotiateError && <p className="md:col-span-2 text-sm text-red-600">{negotiateError}</p>}
+                  {negotiateError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{negotiateError}</p>}
                   <button type="submit" disabled={busy} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {busy ? 'Starting...' : 'Start Negotiation'}
                   </button>
@@ -418,8 +418,8 @@ const GroupBuyDetail = () => {
                 <p className="text-sm text-gray-500 mb-6">Buy the pooled lot from another farmer&apos;s listing. The order is placed as the buyer-representative for the whole group.</p>
                 <form onSubmit={handleCloseDirect} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
-                    <label className="text-xs font-bold uppercase text-gray-400">Listing to buy from</label>
-                    <select required className="w-full bg-cream rounded-xl p-4 mt-1" value={closeForm.productId} onChange={(e) => setCloseForm({ ...closeForm, productId: e.target.value })}>
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="listing-to-buy-from">Listing to buy from</label>
+                    <select id="listing-to-buy-from" required className="w-full bg-cream rounded-xl p-4 mt-1" value={closeForm.productId} onChange={(e) => setCloseForm({ ...closeForm, productId: e.target.value })}>
                       <option value="">Choose a listing…</option>
                       {buyableProducts.map((p) => (
                         <option key={p.id} value={p.id}>{p.name || p.crop || 'Listing'} — ₹{p.user_price ?? p.price}</option>
@@ -430,18 +430,18 @@ const GroupBuyDetail = () => {
                     )}
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Delivery address</label>
-                    <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Village, town, district…" value={closeForm.deliveryAddress} onChange={(e) => setCloseForm({ ...closeForm, deliveryAddress: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-address">Delivery address</label>
+                    <input id="delivery-address" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Village, town, district…" value={closeForm.deliveryAddress} onChange={(e) => setCloseForm({ ...closeForm, deliveryAddress: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Phone (optional)</label>
-                    <input type="tel" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Your phone number" value={closeForm.buyerPhone} onChange={(e) => setCloseForm({ ...closeForm, buyerPhone: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="phone">Phone (optional)</label>
+                    <input id="phone" type="tel" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Your phone number" value={closeForm.buyerPhone} onChange={(e) => setCloseForm({ ...closeForm, buyerPhone: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Locked price per unit, ₹ (optional)</label>
-                    <input type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Leave blank to use the listing price" value={closeForm.unitPrice} onChange={(e) => setCloseForm({ ...closeForm, unitPrice: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="locked-price-per-unit">Locked price per unit, ₹ (optional)</label>
+                    <input id="locked-price-per-unit" type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Leave blank to use the listing price" value={closeForm.unitPrice} onChange={(e) => setCloseForm({ ...closeForm, unitPrice: e.target.value })} />
                   </div>
-                  {closeError && <p className="md:col-span-2 text-sm text-red-600">{closeError}</p>}
+                  {closeError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{closeError}</p>}
                   {closeNote && <p className="md:col-span-2 text-sm font-bold text-green-mid">{closeNote}</p>}
                   <button type="submit" disabled={busy} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {busy ? 'Closing...' : 'Close Group & Place Pooled Order'}
@@ -484,9 +484,9 @@ const GroupBuyDetail = () => {
                 <h2 className="font-playfair text-2xl font-bold text-green-deep mb-2">Settlement</h2>
                 <p className="text-sm text-gray-500 mb-6">Each participant&apos;s share of the pooled order total — what they owe toward the pooled order.</p>
                 {settlementError ? (
-                  <p className="text-center py-10 text-red-600">{settlementError}</p>
+                  <p aria-live="polite" className="text-center py-10 text-red-600">{settlementError}</p>
                 ) : !settlement ? (
-                  <p className="text-center py-10 text-gray-400 italic">Loading settlement...</p>
+                  <p className="text-center py-10 text-gray-600 italic">Loading settlement...</p>
                 ) : settlements.length === 0 ? (
                   <p className="text-gray-500 font-medium py-10 text-center border-4 border-dashed border-cream-dark rounded-[48px]">No settlement rows yet.</p>
                 ) : (
@@ -494,7 +494,7 @@ const GroupBuyDetail = () => {
                     <div className="overflow-x-auto bg-white rounded-[24px] shadow-sm">
                       <table className="w-full text-left">
                         <thead>
-                          <tr className="text-xs font-bold uppercase text-gray-400 border-b border-cream-dark">
+                          <tr className="text-xs font-bold uppercase text-gray-600 border-b border-cream-dark">
                             <th className="p-4">Participant</th>
                             <th className="p-4">Contribution ({group.unit})</th>
                             <th className="p-4">Share</th>
