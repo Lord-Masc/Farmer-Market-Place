@@ -275,6 +275,34 @@ export async function sendAssistantMessage(message, conversationId) {
   });
 }
 
+// Notifications (Stage 9, module H). Contract: GET /api/notifications
+// returns { notifications, unread_count }; PATCH /:id/read returns
+// { notification }; GET/PATCH /preferences carry { preferences } with
+// one row per event type the user has set — missing rows use the
+// defaults (enabled, in_app only, Hindi, no quiet hours), which the
+// page renders, never invented server-side.
+export async function notificationFetch(path, opts = {}) {
+  return authedFetch('/api/notifications', path, opts);
+}
+
+export async function listNotifications({ unreadOnly = false, limit = 20, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (unreadOnly) params.set('unread_only', 'true');
+  return notificationFetch(`?${params.toString()}`);
+}
+
+export async function markNotificationRead(id) {
+  return notificationFetch(`/${encodeURIComponent(id)}/read`, { method: 'PATCH' });
+}
+
+export async function getNotificationPreferences() {
+  return notificationFetch('/preferences');
+}
+
+export async function updateNotificationPreferences(preferences) {
+  return notificationFetch('/preferences', { method: 'PATCH', body: { preferences } });
+}
+
 // Voice input (multipart, field `audio`). NO STT provider is configured
 // — the backend answers 503 with a "voice input is not configured yet"
 // message; callers surface that message honestly, never a fake
