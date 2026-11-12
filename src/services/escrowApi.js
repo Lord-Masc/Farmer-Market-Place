@@ -258,6 +258,54 @@ export async function getDisputeStats() {
   return disputeFetch('/stats');
 }
 
+// AI Farmer Assistant (Stage 8, module G). Contract: POST
+// /api/assistant/chat takes { message, conversation_id? } and returns
+// { conversation_id, intent, entities, answer, sources[], no_data }.
+// sources[] entries are { type, id, ... } — callers render only the
+// fields the backend sent, never invented values. no_data means the
+// answer is an explicit "no data / I don't know" — render it as such.
+export async function assistantFetch(path, opts = {}) {
+  return authedFetch('/api/assistant', path, opts);
+}
+
+export async function sendAssistantMessage(message, conversationId) {
+  return assistantFetch('/chat', {
+    method: 'POST',
+    body: conversationId ? { message, conversation_id: conversationId } : { message },
+  });
+}
+
+// Voice input (multipart, field `audio`). NO STT provider is configured
+// — the backend answers 503 with a "voice input is not configured yet"
+// message; callers surface that message honestly, never a fake
+// transcript. FormData sets its own Content-Type (boundary), so no
+// Content-Type header here — unlike authedFetch.
+export async function sendAssistantVoice(formData) {
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error('Please log in to continue.');
+  }
+
+  const res = await fetch(`${ESCROW_API_URL}/api/assistant/voice`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const error = new Error(data.error || data.message || `Voice request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+
+  return data;
+}
+
 // Dispute evidence upload (multipart, field `file`, image only — the
 // backend 422s non-images; the client checks the MIME type first as a
 // hint only). FormData sets its own Content-Type (boundary), so no
