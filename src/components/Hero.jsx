@@ -110,18 +110,6 @@ const Hero = () => {
                 ))}
               </div>
 
-              <div className="bg-white/5 border border-white/10 rounded-[12px] p-[0.9rem] px-[1rem] flex items-center justify-between">
-                <div className="flex items-center gap-[0.7rem]">
-                  <div className="w-[36px] h-[36px] bg-amber rounded-full flex items-center justify-center text-[1.1rem]">👨‍🌾</div>
-                  <div className="flex flex-col">
-                    <span className="font-dmsans text-[0.82rem] text-white font-medium">Ramesh Patel</span>
-                    <span className="font-dmsans text-[0.72rem] text-white/50">📍 Bareilly, UP</span>
-                  </div>
-                </div>
-                <div className="font-dmsans text-amber-light text-[0.82rem] font-semibold">
-                  ⭐ 4.9
-                </div>
-              </div>
             </div>
           </div>
 

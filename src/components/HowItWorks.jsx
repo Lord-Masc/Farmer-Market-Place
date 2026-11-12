@@ -63,27 +63,6 @@ const HowItWorks = () => {
                 ))}
               </div>
 
-              <h4 className="font-dmsans text-[0.78rem] font-semibold text-gray-800 mb-[0.7rem]">Fresh Today 🌿</h4>
-              
-              <div className="grid grid-cols-2 gap-[0.7rem]">
-                {[
-                  { emoji: '🍅', name: 'Desi Tomatoes', price: '₹45/kg', farm: 'Ramesh Farm' },
-                  { emoji: '🥭', name: 'Alphonso Mangoes', price: '₹120/kg', farm: 'Suresh Farms' },
-                  { emoji: '🧅', name: 'Red Onions', price: '₹25/kg', farm: 'Mohan Ki Khet' },
-                  { emoji: '🥬', name: 'Palak', price: '₹28/kg', farm: 'Devi Agro' },
-                ].map((item, id) => (
-                  <div key={id} className="bg-white rounded-[12px] p-[0.8rem] shadow-sm relative group cursor-pointer border border-transparent hover:border-green-fresh transition-all">
-                    <span className="text-[1.8rem] block mb-[0.5rem]">{item.emoji}</span>
-                    <h5 className="font-dmsans text-[0.75rem] font-semibold text-green-deep">{item.name}</h5>
-                    <p className="font-dmsans text-[0.68rem] text-gray-500 mb-2">{item.farm}</p>
-                    <div className="flex justify-between items-center">
-                      <span className="font-dmsans text-[0.8rem] font-bold text-green-mid">{item.price}</span>
-                      <button className="w-[22px] h-[22px] bg-green-deep rounded-full flex items-center justify-center text-white text-[0.9rem] leading-none hover:bg-green-mid transition-colors">+</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
             </div>
           </div>
         </div>
