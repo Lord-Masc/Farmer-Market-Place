@@ -23,6 +23,11 @@ import DisputeDetail from './pages/DisputeDetail';
 import Assistant from './pages/Assistant';
 import Notifications from './pages/Notifications';
 import VerificationQueue from './pages/admin/VerificationQueue';
+import AdminDashboard from './pages/admin/Dashboard';
+import AdminMetrics from './pages/admin/Metrics';
+import Moderation from './pages/admin/Moderation';
+import Reconciliation from './pages/admin/Reconciliation';
+import Transparency from './pages/Transparency';
 import Checkout from './pages/Checkout';
 import EscrowTest from './pages/EscrowTest';
 import { AuthProvider } from './context/AuthContext';
@@ -56,6 +61,11 @@ function App() {
             <Route path="/pending-orders" element={<PendingOrders />} />
             <Route path="/user-profile" element={<UserProfile />} />
             <Route path="/admin/verifications" element={<VerificationQueue />} />
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/metrics" element={<AdminMetrics />} />
+            <Route path="/admin/moderation" element={<Moderation />} />
+            <Route path="/admin/reconciliation" element={<Reconciliation />} />
+            <Route path="/transparency" element={<Transparency />} />
             <Route path="/checkout" element={<Checkout />} />
             <Route path="/escrow-test" element={<EscrowTest />} />
             {/* Keeping /dashboard as a temporary redirect or landing page can be added later if needed */}
