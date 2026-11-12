@@ -8,11 +8,11 @@
  * intent detection, floor/refusal logic, grounding (every number in an
  * answer must appear in its cited sources), and user-scoped conversation
  * storage. The Supabase mock follows the negotiation.test.js pattern
- * (eq/in/order/limit; a missing table answers an error, which is how
- * the absent mandi_prices table is simulated).
+ * (eq/in/order/limit; a missing table answers a 42P01 error, which is
+ * how a not-yet-migrated table is simulated).
  *
  * Hand-checked literals — NOT derived from the code:
- * - Wheat mandi row: price 2400/quintal, Mathura, 2026-11-12.
+ * - Wheat mandi row: modal_price 2400/quintal, Mathura, 2026-11-12.
  * - Offer off1 (buyer's counter, farmer1's offer): price 2100, tiers
  *   [{ min_quantity: 10, price: 2000 }] — floor is 2000. Asking 1900
  *   must REFUSE; asking 2050 must counter at 2050.
@@ -54,8 +54,8 @@ function makeSupabaseMock(db) {
 
   function execute(q) {
     const table = db[q.table];
-    // A table that does not exist yet (mandi_prices until Stage 3) —
-    // PostgREST answers 42P01; the service must treat that as "no data".
+    // A table that does not exist (e.g. not yet migrated) — PostgREST
+    // answers 42P01; the service must treat that as "no data".
     if (!table) {
       return { data: null, error: { code: '42P01', message: `relation "${q.table}" does not exist` } };
     }
@@ -221,7 +221,7 @@ describe('detectIntent (deterministic, Hindi-first)', () => {
   });
 });
 
-describe('price tool — Stage 3 table does not exist yet', () => {
+describe('price tool — mandi_prices (Stage 3 canonical shape)', () => {
   test('no mandi_prices table returns explicit no-data, never a number', async () => {
     const { service } = setup();
     const result = await service.handleMessage('farmer1', 'gehun ka bhaav kya hai');
@@ -236,8 +236,8 @@ describe('price tool — Stage 3 table does not exist yet', () => {
     const { db, service } = setup();
     db.mandi_prices = [
       {
-        id: 'mp1', crop: 'Wheat', mandi: 'Mathura',
-        price: 2400, unit: 'quintal', date: '2026-11-12',
+        id: 'mp1', commodity: 'Wheat', mandi: 'Mathura',
+        modal_price: 2400, unit: 'quintal', date: '2026-11-12',
       },
     ];
     const result = await service.handleMessage('farmer1', 'gehun ka bhaav kya hai');
@@ -251,7 +251,7 @@ describe('price tool — Stage 3 table does not exist yet', () => {
   test('rows for another crop only is still no-data for this crop', async () => {
     const { db, service } = setup();
     db.mandi_prices = [
-      { id: 'mp2', crop: 'Rice', mandi: 'Mathura', price: 3000, unit: 'quintal', date: '2026-11-12' },
+      { id: 'mp2', commodity: 'Rice', mandi: 'Mathura', modal_price: 3000, unit: 'quintal', date: '2026-11-12' },
     ];
     const result = await service.handleMessage('farmer1', 'gehun ka bhaav kya hai');
     expect(result.no_data).toBe(true);

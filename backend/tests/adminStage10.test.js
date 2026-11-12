@@ -221,7 +221,7 @@ describe('adminMetricsService.getPlatformMetrics', () => {
 
   test('mandi rows present -> modal price in paise (most frequent, rupees x 100)', async () => {
     mockHolder.admin = makeFakeAdmin(metricTables({
-      mandi_prices: [{ price: 2400 }, { price: 2400 }, { price: 2600 }],
+      mandi_prices: [{ modal_price: 2400 }, { modal_price: 2400 }, { modal_price: 2600 }],
     }));
     const m = await service.getPlatformMetrics();
     expect(m.mandi_modal_paise).toBe(240000);
