@@ -147,6 +147,99 @@ export async function getGroupBuySettlement(id) {
   return groupBuysFetch(`/${id}/settlement`);
 }
 
+// Transporters + shipments (Stage 6, module E). Request bodies use the
+// repo's house style (snake_case): vehicle_type, vehicle_number,
+// service_areas, rate_paise_per_km, flat_rate_paise, order_id,
+// transporter_id, price_paise, delivery_window_start/end, otp,
+// proof_photo_path. Money arrives in integer paise — callers render it
+// as rupees (paise / 100). The booking response carries no OTP; the
+// track response carries `otp` only for the buyer.
+export async function transporterFetch(path, opts = {}) {
+  return authedFetch('/api/transporters', path, opts);
+}
+
+// Shipments (/api/shipments/*): quote, book, status, verify-otp, track.
+export async function shipmentFetch(path, opts = {}) {
+  return authedFetch('/api/shipments', path, opts);
+}
+
+// Verified-transporter list without a session (same unauthenticated
+// pattern as publicPassportFetch); the list itself is public data.
+export async function publicTransporterFetch(path) {
+  const res = await fetch(`${ESCROW_API_URL}/api${path}`);
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const error = new Error(data.error || data.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+
+  return data;
+}
+
+export async function listTransporters() {
+  return transporterFetch('/');
+}
+
+export async function getMyTransporter() {
+  return transporterFetch('/mine');
+}
+
+export async function registerTransporter(body) {
+  return transporterFetch('/register', { method: 'POST', body });
+}
+
+export async function quoteShipment(body) {
+  return shipmentFetch('/quote', { method: 'POST', body });
+}
+
+export async function createShipment(body) {
+  return shipmentFetch('/', { method: 'POST', body });
+}
+
+export async function updateShipmentStatus(id, body) {
+  return shipmentFetch(`/${id}/status`, { method: 'PATCH', body });
+}
+
+export async function verifyShipmentOtp(id, body) {
+  return shipmentFetch(`/${id}/verify-otp`, { method: 'POST', body });
+}
+
+export async function getShipmentTrack(id) {
+  return shipmentFetch(`/${id}/track`);
+}
+
+// Delivery-proof upload (/api/uploads/image?kind=proof): same raw-body
+// upload as uploadVerificationDocument, returns the storage path too —
+// the transporter submits that path (not just the URL) to verify-otp.
+// The path starts with `delivery-proofs/`.
+export async function uploadProofPhoto(file) {
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error('Please log in to continue.');
+  }
+
+  const res = await fetch(`${ESCROW_API_URL}/api/uploads/image?kind=proof`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: file,
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(data.error || data.message || `Upload failed (${res.status})`);
+  }
+
+  return { publicUrl: data.publicUrl, path: data.path };
+}
+
 // Image upload (/api/uploads/*): the file goes as the raw request body so
 // the backend can verify its real bytes (MIME + magic bytes) before it
 // reaches storage. Client-side validateImageFile stays as the first gate.
