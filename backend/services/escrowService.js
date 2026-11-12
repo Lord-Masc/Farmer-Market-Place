@@ -94,7 +94,12 @@ async function fetchProfile(userId) {
     return getSingle(data);
 }
 
-exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey) => {
+exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey, opts = {}) => {
+    // opts.unitPriceOverride: negotiation acceptance passes the LOCKED
+    // price here instead of re-deriving it from the listing, so a later
+    // farmer price edit cannot change what the order charges. The
+    // override joins the idempotency hash, so the same key + a different
+    // locked price is a 422, not a silent replay.
     const { product_id, quantity, unit = 'kg', delivery_address, buyer_phone } = input;
     if (!product_id || quantity === undefined || quantity === null ||
         !delivery_address || !String(delivery_address).trim()) {
@@ -110,8 +115,14 @@ exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey) => 
     // constraint — a check-then-insert would race under retries.
     let requestHash = null;
     if (idempotencyKey) {
+        // The locked price joins the hash ONLY when an override is present:
+        // the no-override hash stays byte-identical to before, so existing
+        // checkout idempotency is untouched. Same key + a different locked
+        // price still hashes differently (422), never a silent replay.
+        const hashInput = { buyerId, product_id, quantity: qty, unit, delivery_address: address, buyer_phone: buyer_phone ? String(buyer_phone).trim() : '' };
+        if (opts.unitPriceOverride != null) hashInput.lockedUnitPrice = Number(opts.unitPriceOverride);
         requestHash = crypto.createHash('sha256')
-            .update(JSON.stringify({ buyerId, product_id, quantity: qty, unit, delivery_address: address, buyer_phone: buyer_phone ? String(buyer_phone).trim() : '' }))
+            .update(JSON.stringify(hashInput))
             .digest('hex');
         const { error: claimError } = await supabase.from('idempotency_keys')
             .insert({ key: idempotencyKey, user_id: buyerId, request_hash: requestHash, status: 'in_progress' })
@@ -159,7 +170,12 @@ exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey) => 
         if (Number(product.quantity) < qty * multiplier) {
             throw new AppError(409, 'INSUFFICIENT_STOCK', 'Insufficient stock for this order.');
         }
-        const unitPrice = Number(product.user_price ?? product.price);
+        const unitPrice = opts.unitPriceOverride != null
+            ? Number(opts.unitPriceOverride)
+            : Number(product.user_price ?? product.price);
+        if (opts.unitPriceOverride != null && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+            throw new AppError(422, 'VALIDATION_ERROR', 'Locked price must be a number greater than 0.');
+        }
         const total = unitPrice * qty * multiplier;
         if (!Number.isFinite(total) || total <= 0) {
             throw new AppError(409, 'AMOUNT_MISMATCH', 'This product has no valid price.');
