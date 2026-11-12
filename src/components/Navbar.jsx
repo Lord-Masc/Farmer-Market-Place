@@ -78,6 +78,15 @@ const Navbar = () => {
                   >
                     📊 My Dashboard
                   </Link>
+                  {profile?.role === 'buyer' && (
+                    <Link
+                      to="/requirements"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                    >
+                      📝 Requirements
+                    </Link>
+                  )}
                   {profile?.role === 'admin' && (
                     <Link
                       to="/admin/verifications"
