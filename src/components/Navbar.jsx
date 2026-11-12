@@ -87,6 +87,15 @@ const Navbar = () => {
                       📝 Requirements
                     </Link>
                   )}
+                  {profile?.role === 'farmer' && (
+                    <Link
+                      to="/group-buys"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                    >
+                      🤝 Group buys
+                    </Link>
+                  )}
                   {profile?.role === 'admin' && (
                     <Link
                       to="/admin/verifications"
