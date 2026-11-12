@@ -265,22 +265,24 @@ const NegotiationThread = () => {
 
   const tierEditor = (tiers, setTiers) => (
     <div>
-      <p className="text-xs font-bold uppercase text-gray-400 mb-2">Quantity tiers (optional)</p>
+      <p className="text-xs font-bold uppercase text-gray-600 mb-2">Quantity tiers (optional)</p>
       {tiers.map((tier, i) => (
         <div key={i} className="flex gap-3 mb-2">
           <input
             type="number" min="0.01" step="0.01" placeholder="Min quantity"
+            aria-label={`Minimum quantity for tier ${i + 1}`}
             className="flex-1 bg-cream rounded-xl p-3"
             value={tier.min_quantity}
             onChange={(e) => setTiers(tiers.map((t, j) => (j === i ? { ...t, min_quantity: e.target.value } : t)))}
           />
           <input
             type="number" min="0.01" step="0.01" placeholder="Price (₹)"
+            aria-label={`Price in rupees for tier ${i + 1}`}
             className="flex-1 bg-cream rounded-xl p-3"
             value={tier.price}
             onChange={(e) => setTiers(tiers.map((t, j) => (j === i ? { ...t, price: e.target.value } : t)))}
           />
-          <button type="button" onClick={() => setTiers(tiers.filter((_, j) => j !== i))} className="text-red-500 font-bold px-2">✕</button>
+          <button type="button" onClick={() => setTiers(tiers.filter((_, j) => j !== i))} aria-label={`Remove tier ${i + 1}`} className="text-red-500 font-bold px-2">✕</button>
         </div>
       ))}
       <button type="button" onClick={() => setTiers([...tiers, { min_quantity: '', price: '' }])} className="text-sm font-bold text-green-mid hover:text-green-deep">
@@ -289,19 +291,21 @@ const NegotiationThread = () => {
     </div>
   );
 
-  const offerFormFields = (form, setForm, tiers, setTiers) => (
+  // prefix keeps ids unique: this helper renders twice on the page
+  // (quote form + counter form), so a bare "price" id would duplicate.
+  const offerFormFields = (form, setForm, tiers, setTiers, prefix) => (
     <>
       <div>
-        <label className="text-xs font-bold uppercase text-gray-400">Price (₹)</label>
-        <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+        <label className="text-xs font-bold uppercase text-gray-600" htmlFor={`${prefix}-price`}>Price (₹)</label>
+        <input id={`${prefix}-price`} required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
       </div>
       <div>
-        <label className="text-xs font-bold uppercase text-gray-400">Quantity</label>
-        <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
+        <label className="text-xs font-bold uppercase text-gray-600" htmlFor={`${prefix}-quantity`}>Quantity</label>
+        <input id={`${prefix}-quantity`} required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
       </div>
       <div className="md:col-span-2">
-        <label className="text-xs font-bold uppercase text-gray-400">Expires at</label>
-        <input required type="datetime-local" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
+        <label className="text-xs font-bold uppercase text-gray-600" htmlFor={`${prefix}-expires-at`}>Expires at</label>
+        <input id={`${prefix}-expires-at`} required type="datetime-local" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
       </div>
       <div className="md:col-span-2">{tierEditor(tiers, setTiers)}</div>
     </>
@@ -312,11 +316,11 @@ const NegotiationThread = () => {
       <Navbar />
       <main className="pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
         {loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading negotiation...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading negotiation...</p>
         ) : forbidden ? (
           <p className="py-20 text-center text-gray-500 font-medium">You don&apos;t have access to this page.</p>
         ) : error ? (
-          <p className="py-20 text-center text-red-600">{error}</p>
+          <p aria-live="polite" className="py-20 text-center text-red-600">{error}</p>
         ) : (
           <>
             <header className="mb-10">
@@ -357,15 +361,15 @@ const NegotiationThread = () => {
               </section>
             )}
 
-            {actionError && <p className="text-sm text-red-600 mb-6">{actionError}</p>}
+            {actionError && <p aria-live="polite" className="text-sm text-red-600 mb-6">{actionError}</p>}
 
             {!agreement && !isBuyer && profile?.role === 'farmer' && (
               <section className="bg-white rounded-[24px] p-6 shadow-sm mb-10">
                 <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Quote on this requirement</h2>
                 <form onSubmit={handleQuote} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="md:col-span-2">
-                    <label className="text-xs font-bold uppercase text-gray-400">Your listing</label>
-                    <select required className="w-full bg-cream rounded-xl p-4 mt-1" value={quote.productId} onChange={(e) => setQuote({ ...quote, productId: e.target.value })}>
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="quote-listing">Your listing</label>
+                    <select id="quote-listing" required className="w-full bg-cream rounded-xl p-4 mt-1" value={quote.productId} onChange={(e) => setQuote({ ...quote, productId: e.target.value })}>
                       <option value="">Choose one of your listings…</option>
                       {ownProducts.map((p) => (
                         <option key={p.id} value={p.id}>{p.name || p.crop || 'Listing'} — ₹{p.user_price ?? p.price}</option>
@@ -375,8 +379,8 @@ const NegotiationThread = () => {
                       <p className="text-sm text-gray-500 mt-2">You have no listings yet — <Link to="/farmer-dashboard" className="font-bold text-green-mid">list a product first</Link>.</p>
                     )}
                   </div>
-                  {offerFormFields(quote, setQuote, quoteTiers, setQuoteTiers)}
-                  {quoteError && <p className="md:col-span-2 text-sm text-red-600">{quoteError}</p>}
+                  {offerFormFields(quote, setQuote, quoteTiers, setQuoteTiers, 'quote')}
+                  {quoteError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{quoteError}</p>}
                   <button type="submit" disabled={busy} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {busy ? 'Sending...' : 'Send Quote'}
                   </button>
@@ -388,7 +392,7 @@ const NegotiationThread = () => {
               <section className="bg-white rounded-[24px] p-6 shadow-sm mb-10">
                 <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Counter-offer</h2>
                 <form onSubmit={handleCounter} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {offerFormFields(counter, setCounter, counterTiers, setCounterTiers)}
+                  {offerFormFields(counter, setCounter, counterTiers, setCounterTiers, 'counter')}
                   <button type="submit" disabled={busy} className="bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {busy ? 'Sending...' : 'Send Counter-offer'}
                   </button>
@@ -405,12 +409,12 @@ const NegotiationThread = () => {
                 <p className="text-sm text-gray-500 mb-6">Accepting locks the price at ₹{accepting.price} and creates the order. Enter where it should be delivered.</p>
                 <form onSubmit={handleAccept} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Delivery address</label>
-                    <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Village, town, district…" value={acceptForm.deliveryAddress} onChange={(e) => setAcceptForm({ ...acceptForm, deliveryAddress: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="accept-address">Delivery address</label>
+                    <input id="accept-address" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Village, town, district…" value={acceptForm.deliveryAddress} onChange={(e) => setAcceptForm({ ...acceptForm, deliveryAddress: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Phone (optional)</label>
-                    <input type="tel" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Your phone number" value={acceptForm.buyerPhone} onChange={(e) => setAcceptForm({ ...acceptForm, buyerPhone: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="accept-phone">Phone (optional)</label>
+                    <input id="accept-phone" type="tel" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Your phone number" value={acceptForm.buyerPhone} onChange={(e) => setAcceptForm({ ...acceptForm, buyerPhone: e.target.value })} />
                   </div>
                   <button type="submit" disabled={busy} className="bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {busy ? 'Accepting...' : 'Confirm & Accept'}

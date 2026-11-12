@@ -168,8 +168,8 @@ const SignUp = () => {
 
         <form className="grid grid-cols-1 sm:grid-cols-2 gap-5" onSubmit={handleSignUp}>
           <div className="space-y-1.5 text-left">
-            <label className="text-sm font-medium text-green-deep block">First Name</label>
-            <input 
+            <label className="text-sm font-medium text-green-deep block" htmlFor="first-name">First Name</label>
+            <input id="first-name"
               type="text" 
               required
               value={firstName}
@@ -180,8 +180,8 @@ const SignUp = () => {
           </div>
 
           <div className="space-y-1.5 text-left">
-            <label className="text-sm font-medium text-green-deep block">Last Name</label>
-            <input 
+            <label className="text-sm font-medium text-green-deep block" htmlFor="last-name">Last Name</label>
+            <input id="last-name"
               type="text" 
               required
               value={lastName}
@@ -192,8 +192,8 @@ const SignUp = () => {
           </div>
 
           <div className="space-y-1.5 text-left sm:col-span-2">
-            <label className="text-sm font-medium text-green-deep block">Email Address</label>
-            <input 
+            <label className="text-sm font-medium text-green-deep block" htmlFor="email-address">Email Address</label>
+            <input id="email-address"
               type="email" 
               required
               value={email}
@@ -204,12 +204,13 @@ const SignUp = () => {
           </div>
 
           <div className="space-y-1.5 text-left sm:col-span-2">
-            <label className="text-sm font-medium text-green-deep block">Phone Number</label>
+            <label className="text-sm font-medium text-green-deep block" htmlFor="phone-number">Phone Number</label>
             <div className="flex gap-2">
               <span className="bg-cream-dark rounded-xl px-3 py-3 text-sm text-gray-500 font-medium">+91</span>
               <input 
                 type="tel" 
                 required
+                id="phone-number"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="10-digit mobile number" 
@@ -219,11 +220,12 @@ const SignUp = () => {
           </div>
 
           <div className="space-y-1.5 text-left sm:col-span-2 relative">
-            <label className="text-sm font-medium text-green-deep block">Password</label>
+            <label className="text-sm font-medium text-green-deep block" htmlFor="signup-password">Password</label>
             <div className="relative">
               <input 
                 type={showPassword ? "text" : "password"} 
                 required
+                id="signup-password"
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -233,6 +235,7 @@ const SignUp = () => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 className="absolute right-4 top-1/2 -translate-y-1/2 text-lg opacity-50 hover:opacity-100 transition-opacity"
               >
                 {showPassword ? '👁️' : '🔒'}
@@ -242,8 +245,8 @@ const SignUp = () => {
 
           {role === 'farmer' && (
             <div className="space-y-1.5 text-left sm:col-span-2 animate-slideDown">
-              <label className="text-sm font-medium text-green-deep block">Farm Location (UP District)</label>
-              <select 
+              <label className="text-sm font-medium text-green-deep block" htmlFor="farm-location">Farm Location (UP District)</label>
+              <select id="farm-location"
                 required
                 value={state}
                 onChange={(e) => setState(e.target.value)}
@@ -333,6 +336,7 @@ const SignUp = () => {
             <input 
               type="checkbox" 
               required 
+              aria-label="I agree to the Terms of Service and Privacy Policy"
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
               className="mt-1 accent-green-deep" 

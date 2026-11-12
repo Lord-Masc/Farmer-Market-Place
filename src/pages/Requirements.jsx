@@ -120,30 +120,30 @@ const Requirements = () => {
               <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Post a requirement</h2>
               <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-400">Crop</label>
-                  <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} />
+                  <label className="text-xs font-bold uppercase text-gray-600" htmlFor="crop">Crop</label>
+                  <input id="crop" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-400">Quantity</label>
-                  <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="100" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
+                  <label className="text-xs font-bold uppercase text-gray-600" htmlFor="quantity">Quantity</label>
+                  <input id="quantity" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="100" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-400">Quality</label>
-                  <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Grade A" value={form.quality} onChange={(e) => setForm({ ...form, quality: e.target.value })} />
+                  <label className="text-xs font-bold uppercase text-gray-600" htmlFor="quality">Quality</label>
+                  <input id="quality" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Grade A" value={form.quality} onChange={(e) => setForm({ ...form, quality: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-400">Target price (₹)</label>
-                  <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="2500" value={form.targetPrice} onChange={(e) => setForm({ ...form, targetPrice: e.target.value })} />
+                  <label className="text-xs font-bold uppercase text-gray-600" htmlFor="target-price">Target price (₹)</label>
+                  <input id="target-price" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="2500" value={form.targetPrice} onChange={(e) => setForm({ ...form, targetPrice: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-400">Delivery window start</label>
-                  <input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.deliveryWindowStart} onChange={(e) => setForm({ ...form, deliveryWindowStart: e.target.value })} />
+                  <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-window-start">Delivery window start</label>
+                  <input id="delivery-window-start" required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.deliveryWindowStart} onChange={(e) => setForm({ ...form, deliveryWindowStart: e.target.value })} />
                 </div>
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-400">Delivery window end</label>
-                  <input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.deliveryWindowEnd} onChange={(e) => setForm({ ...form, deliveryWindowEnd: e.target.value })} />
+                  <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-window-end">Delivery window end</label>
+                  <input id="delivery-window-end" required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.deliveryWindowEnd} onChange={(e) => setForm({ ...form, deliveryWindowEnd: e.target.value })} />
                 </div>
-                {formError && <p className="md:col-span-2 text-sm text-red-600">{formError}</p>}
+                {formError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{formError}</p>}
                 <button type="submit" disabled={saving} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                   {saving ? 'Posting...' : 'Post Requirement'}
                 </button>
@@ -153,13 +153,13 @@ const Requirements = () => {
             <section>
               <h2 className="font-playfair text-2xl font-bold text-green-deep mb-6">Your requirements</h2>
               {listLoading ? (
-                <p className="text-center py-10 text-gray-400 italic">Loading your requirements...</p>
+                <p className="text-center py-10 text-gray-600 italic">Loading your requirements...</p>
               ) : listError ? (
-                <p className="text-center py-10 text-red-600">{listError}</p>
+                <p aria-live="polite" className="text-center py-10 text-red-600">{listError}</p>
               ) : requirements.length === 0 ? (
                 <div className="py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
-                  <p className="text-gray-400 font-bold italic text-xl">No requirements yet.</p>
-                  <p className="text-gray-400 text-sm mt-2">Post one above and farmers will quote on it.</p>
+                  <p className="text-gray-600 font-bold italic text-xl">No requirements yet.</p>
+                  <p className="text-gray-600 text-sm mt-2">Post one above and farmers will quote on it.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

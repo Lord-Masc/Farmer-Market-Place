@@ -135,7 +135,7 @@ const Transporters = () => {
                 ) : verificationStatus === 'verified' ? (
                   <p className="text-sm font-bold text-green-mid">You are a verified transporter.</p>
                 ) : verificationStatus === 'rejected' ? (
-                  <p className="text-sm text-red-600">Your transporter registration was rejected.</p>
+                  <p aria-live="polite" className="text-sm text-red-600">Your transporter registration was rejected.</p>
                 ) : (
                   <p className="text-sm text-gray-500">Status: {verificationStatus || '—'}</p>
                 )}
@@ -156,26 +156,26 @@ const Transporters = () => {
                 <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Register as a transporter</h2>
                 <form onSubmit={handleRegister} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Vehicle type</label>
-                    <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Truck, tempo, tractor..." value={form.vehicleType} onChange={(e) => setForm({ ...form, vehicleType: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="vehicle-type">Vehicle type</label>
+                    <input id="vehicle-type" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Truck, tempo, tractor..." value={form.vehicleType} onChange={(e) => setForm({ ...form, vehicleType: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Vehicle number</label>
-                    <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="UP81 AB 1234" value={form.vehicleNumber} onChange={(e) => setForm({ ...form, vehicleNumber: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="vehicle-number">Vehicle number</label>
+                    <input id="vehicle-number" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="UP81 AB 1234" value={form.vehicleNumber} onChange={(e) => setForm({ ...form, vehicleNumber: e.target.value })} />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="text-xs font-bold uppercase text-gray-400">Service areas (comma-separated)</label>
-                    <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Mathura, Agra, Bulandshahr" value={form.serviceAreas} onChange={(e) => setForm({ ...form, serviceAreas: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="service-areas">Service areas (comma-separated)</label>
+                    <input id="service-areas" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Mathura, Agra, Bulandshahr" value={form.serviceAreas} onChange={(e) => setForm({ ...form, serviceAreas: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Rate per km (₹, optional if flat rate given)</label>
-                    <input type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="12" value={form.ratePerKm} onChange={(e) => setForm({ ...form, ratePerKm: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="rate-per-km">Rate per km (₹, optional if flat rate given)</label>
+                    <input id="rate-per-km" type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="12" value={form.ratePerKm} onChange={(e) => setForm({ ...form, ratePerKm: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Flat rate (₹, optional if per-km rate given)</label>
-                    <input type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="500" value={form.flatRate} onChange={(e) => setForm({ ...form, flatRate: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="flat-rate">Flat rate (₹, optional if per-km rate given)</label>
+                    <input id="flat-rate" type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="500" value={form.flatRate} onChange={(e) => setForm({ ...form, flatRate: e.target.value })} />
                   </div>
-                  {formError && <p className="md:col-span-2 text-sm text-red-600">{formError}</p>}
+                  {formError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{formError}</p>}
                   <button type="submit" disabled={saving} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {saving ? 'Registering...' : 'Register as Transporter'}
                   </button>
@@ -186,13 +186,13 @@ const Transporters = () => {
             <section>
               <h2 className="font-playfair text-2xl font-bold text-green-deep mb-6">Verified transporters</h2>
               {listLoading ? (
-                <p className="text-center py-10 text-gray-400 italic">Loading transporters...</p>
+                <p className="text-center py-10 text-gray-600 italic">Loading transporters...</p>
               ) : listError ? (
-                <p className="text-center py-10 text-red-600">{listError}</p>
+                <p aria-live="polite" className="text-center py-10 text-red-600">{listError}</p>
               ) : transporters.length === 0 ? (
                 <div className="py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
-                  <p className="text-gray-400 font-bold italic text-xl">No verified transporters yet.</p>
-                  <p className="text-gray-400 text-sm mt-2">Register above — listings appear here once an admin approves them.</p>
+                  <p className="text-gray-600 font-bold italic text-xl">No verified transporters yet.</p>
+                  <p className="text-gray-600 text-sm mt-2">Register above — listings appear here once an admin approves them.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

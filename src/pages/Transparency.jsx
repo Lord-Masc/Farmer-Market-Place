@@ -40,7 +40,7 @@ const Transparency = () => {
         </header>
 
         {loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading transparency metrics...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading transparency metrics...</p>
         ) : error ? (
           <p className="py-20 text-center text-red-600">{error}</p>
         ) : (

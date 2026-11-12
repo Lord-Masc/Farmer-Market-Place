@@ -255,7 +255,7 @@ const Notifications = () => {
           <button
             type="button"
             onClick={() => setUnreadOnly((prev) => !prev)}
-            className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${unreadOnly ? 'bg-green-deep text-white shadow-lg' : 'bg-white text-gray-400 hover:bg-amber/10 hover:text-amber'}`}
+            className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${unreadOnly ? 'bg-green-deep text-white shadow-lg' : 'bg-white text-gray-600 hover:bg-amber/10 hover:text-amber'}`}
           >
             {unreadOnly ? '✓ Unread only' : 'Unread only'}
           </button>
@@ -263,16 +263,16 @@ const Notifications = () => {
             type="button"
             onClick={() => void fetchNotifications(0, unreadOnly, false)}
             disabled={listLoading}
-            className="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase bg-white text-gray-400 hover:bg-amber/10 hover:text-amber disabled:opacity-50"
+            className="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase bg-white text-gray-600 hover:bg-amber/10 hover:text-amber disabled:opacity-50"
           >
             Refresh
           </button>
         </div>
 
         {listLoading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading notifications...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading notifications...</p>
         ) : listError ? (
-          <p className="py-20 text-center text-red-600">{listError}</p>
+          <p aria-live="polite" className="py-20 text-center text-red-600">{listError}</p>
         ) : notifications.length === 0 ? (
           <p className="text-gray-500 font-medium py-10 text-center border-4 border-dashed border-cream-dark rounded-[48px]">No notifications yet.</p>
         ) : (
@@ -301,7 +301,7 @@ const Notifications = () => {
                   </div>
                   <p className={`font-bold text-green-deep ${unread ? 'font-black' : ''}`}>{n.title || EVENT_LABELS[n.type] || n.type}</p>
                   {n.body && <p className="text-sm text-gray-500 mt-1 whitespace-pre-wrap">{n.body}</p>}
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="text-xs text-gray-600 mt-2">
                     {formatRelativeTime(n.created_at)}
                     {n.created_at && ` · ${new Date(n.created_at).toLocaleString()}`}
                     {unread && markingId === n.id ? ' · Marking as read…' : ''}
@@ -333,9 +333,9 @@ const Notifications = () => {
             your inbox until a provider is set up. Nothing here implies an email or SMS was sent.
           </p>
           {prefsLoading ? (
-            <p className="text-center py-10 text-gray-400 italic">Loading preferences...</p>
+            <p className="text-center py-10 text-gray-600 italic">Loading preferences...</p>
           ) : prefsError && !preferences ? (
-            <p className="text-red-600">{prefsError}</p>
+            <p aria-live="polite" className="text-red-600">{prefsError}</p>
           ) : (
             <form onSubmit={handleSavePreferences}>
               <div className="space-y-4">
@@ -350,7 +350,7 @@ const Notifications = () => {
                         />
                         {EVENT_LABELS[pref.event_type] || pref.event_type}
                       </label>
-                      <span className="text-xs text-gray-400">{pref.event_type}</span>
+                      <span className="text-xs text-gray-600">{pref.event_type}</span>
                     </div>
                     <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm text-gray-600">
                       <div className="flex flex-wrap gap-3">
@@ -402,7 +402,7 @@ const Notifications = () => {
                   </div>
                 ))}
               </div>
-              {prefsError && <p className="text-sm text-red-600 mt-4">{prefsError}</p>}
+              {prefsError && <p aria-live="polite" className="text-sm text-red-600 mt-4">{prefsError}</p>}
               {prefsSaved && <p className="text-sm text-green-700 mt-4">{prefsSaved}</p>}
               <button type="submit" disabled={prefsSaving} className="mt-6 bg-green-deep text-white font-black px-6 py-3 rounded-xl disabled:opacity-50">
                 {prefsSaving ? 'Saving...' : 'Save preferences'}

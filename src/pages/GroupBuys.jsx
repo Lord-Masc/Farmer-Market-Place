@@ -152,25 +152,25 @@ const GroupBuys = () => {
                 <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Start a group buy</h2>
                 <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Crop</label>
-                    <input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="crop">Crop</label>
+                    <input id="crop" required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Threshold quantity</label>
-                    <input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="1000" value={form.thresholdQuantity} onChange={(e) => setForm({ ...form, thresholdQuantity: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="threshold-quantity">Threshold quantity</label>
+                    <input id="threshold-quantity" required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="1000" value={form.thresholdQuantity} onChange={(e) => setForm({ ...form, thresholdQuantity: e.target.value })} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Unit</label>
-                    <select className="w-full bg-cream rounded-xl p-4 mt-1" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="unit">Unit</label>
+                    <select id="unit" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>
                       <option value="kg">kg</option>
                       <option value="quintal">quintal</option>
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Deadline</label>
-                    <input required type="datetime-local" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="deadline">Deadline</label>
+                    <input id="deadline" required type="datetime-local" className="w-full bg-cream rounded-xl p-4 mt-1" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
                   </div>
-                  {formError && <p className="md:col-span-2 text-sm text-red-600">{formError}</p>}
+                  {formError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{formError}</p>}
                   <button type="submit" disabled={saving} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {saving ? 'Creating...' : 'Create Group Buy'}
                   </button>
@@ -196,13 +196,13 @@ const GroupBuys = () => {
               </div>
 
               {listLoading ? (
-                <p className="text-center py-10 text-gray-400 italic">Loading group buys...</p>
+                <p className="text-center py-10 text-gray-600 italic">Loading group buys...</p>
               ) : listError ? (
-                <p className="text-center py-10 text-red-600">{listError}</p>
+                <p aria-live="polite" className="text-center py-10 text-red-600">{listError}</p>
               ) : groups.length === 0 ? (
                 <div className="py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
-                  <p className="text-gray-400 font-bold italic text-xl">No group buys yet.</p>
-                  <p className="text-gray-400 text-sm mt-2">Start one above and other farmers can pool in.</p>
+                  <p className="text-gray-600 font-bold italic text-xl">No group buys yet.</p>
+                  <p className="text-gray-600 text-sm mt-2">Start one above and other farmers can pool in.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -231,9 +231,10 @@ const GroupBuys = () => {
                             onSubmit={(e) => { e.preventDefault(); void handleJoin(group); }}
                             className="border-t border-cream-dark pt-4"
                           >
-                            <label className="text-xs font-bold uppercase text-gray-400">Your contribution ({group.unit})</label>
+                            <label className="text-xs font-bold uppercase text-gray-600" htmlFor={`join-qty-${group.id}`}>Your contribution ({group.unit})</label>
                             <div className="flex gap-3 mt-1">
                               <input
+                                id={`join-qty-${group.id}`}
                                 required
                                 type="number" min="0.01" step="0.01" placeholder="100"
                                 className="flex-1 bg-cream rounded-xl p-3"
@@ -244,7 +245,7 @@ const GroupBuys = () => {
                                 {joinBusy[group.id] ? 'Joining...' : 'Join'}
                               </button>
                             </div>
-                            {joinErrors[group.id] && <p className="text-sm text-red-600 mt-2">{joinErrors[group.id]}</p>}
+                            {joinErrors[group.id] && <p aria-live="polite" className="text-sm text-red-600 mt-2">{joinErrors[group.id]}</p>}
                           </form>
                         )}
                         {alreadyJoined && (

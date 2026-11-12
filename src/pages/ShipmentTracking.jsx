@@ -112,11 +112,11 @@ const ShipmentTracking = () => {
       <Navbar />
       <main className="pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
         {loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading shipment...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading shipment...</p>
         ) : forbidden ? (
           <p className="py-20 text-center text-gray-500 font-medium">You don&apos;t have access to this page.</p>
         ) : error ? (
-          <p className="py-20 text-center text-red-600">{error}</p>
+          <p aria-live="polite" className="py-20 text-center text-red-600">{error}</p>
         ) : (
           <>
             <header className="mb-10">
@@ -162,22 +162,22 @@ const ShipmentTracking = () => {
                 <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Update status</h2>
                 <form onSubmit={handleStatusUpdate} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Status</label>
-                    <select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={status} onChange={(e) => setStatus(e.target.value)}>
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="status">Status</label>
+                    <select id="status" className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={status} onChange={(e) => setStatus(e.target.value)}>
                       {statusOptions.map((s) => (
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Latitude (optional — your current coordinates)</label>
-                    <input type="number" step="any" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="e.g. 27.58" value={lat} onChange={(e) => setLat(e.target.value)} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="latitude">Latitude (optional — your current coordinates)</label>
+                    <input id="latitude" type="number" step="any" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="e.g. 27.58" value={lat} onChange={(e) => setLat(e.target.value)} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-400">Longitude (optional — your current coordinates)</label>
-                    <input type="number" step="any" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="e.g. 77.70" value={lng} onChange={(e) => setLng(e.target.value)} />
+                    <label className="text-xs font-bold uppercase text-gray-600" htmlFor="longitude">Longitude (optional — your current coordinates)</label>
+                    <input id="longitude" type="number" step="any" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="e.g. 77.70" value={lng} onChange={(e) => setLng(e.target.value)} />
                   </div>
-                  {statusError && <p className="md:col-span-2 text-sm text-red-600">{statusError}</p>}
+                  {statusError && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{statusError}</p>}
                   <button type="submit" disabled={statusBusy} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
                     {statusBusy ? 'Updating...' : 'Update Status'}
                   </button>
@@ -217,7 +217,7 @@ const ShipmentTracking = () => {
                 <div className="overflow-x-auto bg-white rounded-[24px] shadow-sm">
                   <table className="w-full text-left">
                     <thead>
-                      <tr className="text-xs font-bold uppercase text-gray-400 border-b border-cream-dark">
+                      <tr className="text-xs font-bold uppercase text-gray-600 border-b border-cream-dark">
                         <th className="p-4">Latitude</th>
                         <th className="p-4">Longitude</th>
                         <th className="p-4">Recorded at</th>
