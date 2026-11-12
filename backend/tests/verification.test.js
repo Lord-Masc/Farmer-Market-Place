@@ -79,7 +79,23 @@ function makeSupabaseMock(db) {
     return api;
   }
 
-  return { from: (table) => builder(table) };
+  return {
+    from: (table) => builder(table),
+    storage: {
+      // Signed URLs for the private verification-docs bucket. Records
+      // which bucket each call targeted so tests can prove no public
+      // product-images URL is ever built for a verification document.
+      from: (bucket) => {
+        mockHolder.lastStorageBucket = bucket;
+        return {
+          createSignedUrl: jest.fn(async (path, expiresIn) => ({
+            data: { signedUrl: `https://example.test/signed/${bucket}/${path}?expires=${expiresIn}` },
+            error: null,
+          })),
+        };
+      },
+    },
+  };
 }
 
 function seedDb() {
@@ -226,6 +242,70 @@ describe('verificationService approve/reject', () => {
   });
 });
 
+describe('verificationService.getDocumentSignedUrl (Stage 2 hardening)', () => {
+  let service;
+  let db;
+  let pending;
+
+  beforeEach(async () => {
+    jest.resetModules();
+    db = seedDb();
+    mockHolder.supabase = makeSupabaseMock(db);
+    mockHolder.lastStorageBucket = null;
+    service = require('../services/verificationService');
+    pending = await service.submitVerification('farmer1', 'verification-docs/farmer1-abc.jpg');
+  });
+
+  test('happy path returns a signed URL valid for 300s from the private bucket', async () => {
+    const result = await service.getDocumentSignedUrl('admin1', pending.id);
+    expect(mockHolder.lastStorageBucket).toBe('verification-docs');
+    expect(result.expiresIn).toBe(300);
+    expect(result.signedUrl).toBe(
+      'https://example.test/signed/verification-docs/verification-docs/farmer1-abc.jpg?expires=300',
+    );
+    expect(result).not.toHaveProperty('publicUrl');
+    expect(db.audit_log).toHaveLength(2);
+    expect(db.audit_log[1]).toMatchObject({ event: 'verification.document_viewed', actor_id: 'admin1' });
+  });
+
+  test('missing submission is a 404', async () => {
+    await expect(service.getDocumentSignedUrl('admin1', 'no-such-id'))
+      .rejects.toMatchObject({ status: 404, code: 'VERIFICATION_NOT_FOUND' });
+  });
+
+  test('a document outside the private bucket is a 422 — never served publicly', async () => {
+    db.verification_submissions.push({
+      id: 'legacy-public', farmer_id: 'farmer1',
+      document_path: 'product-items/farmer1-old.jpg', status: 'pending',
+    });
+    await expect(service.getDocumentSignedUrl('admin1', 'legacy-public'))
+      .rejects.toMatchObject({ status: 422, code: 'VALIDATION_ERROR' });
+    expect(mockHolder.lastStorageBucket).toBeNull();
+  });
+
+  test('a failing audit insert never breaks the signed-URL response', async () => {
+    delete db.audit_log;
+    const result = await service.getDocumentSignedUrl('admin1', pending.id);
+    expect(result.expiresIn).toBe(300);
+    expect(result.signedUrl).toContain('verification-docs/farmer1-abc.jpg');
+  });
+
+  test('no public URL is ever constructed for a verification document', () => {
+    const fs = require('fs');
+    const path = require('path');
+    for (const file of ['../services/verificationService.js', '../routes/adminRoutes.js']) {
+      const src = fs.readFileSync(path.join(__dirname, file), 'utf8');
+      expect(src).not.toContain('getPublicUrl');
+      expect(src).not.toContain('/object/public/');
+    }
+    const queue = fs.readFileSync(
+      path.join(__dirname, '../../src/pages/admin/VerificationQueue.jsx'), 'utf8',
+    );
+    expect(queue).not.toContain('/object/public/');
+    expect(queue).not.toContain('getPublicUrl');
+  });
+});
+
 describe('verificationService listVerifications / listRoles / changeRole', () => {
   let service;
   let db;
@@ -329,10 +409,51 @@ describe('routes mount the right guards', () => {
       .toEqual([
         'GET /roles',
         'GET /verifications',
+        'GET /verifications/:id/document',
         'POST /roles/:userId',
         'POST /verifications/:id/approve',
         'POST /verifications/:id/reject',
       ].sort());
+  });
+
+  test('GET /verifications/:id/document handler returns the signed URL', async () => {
+    const service = require('../services/verificationService');
+    const pending = await service.submitVerification('farmer1', 'verification-docs/farmer1-abc.jpg');
+    const adminRoutes = require('../routes/adminRoutes');
+    const layer = adminRoutes.stack.find((l) => l.route && l.route.path === '/verifications/:id/document');
+    expect(layer).toBeDefined();
+    const handler = layer.route.stack[0].handle;
+    const req = { user: { id: 'admin1' }, params: { id: pending.id } };
+    const res = mockRes();
+    const next = jest.fn();
+    await handler(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ expiresIn: 300 }));
+    expect(res.json.mock.calls[0][0].signedUrl).toContain('verification-docs/farmer1-abc.jpg');
+  });
+
+  test('GET /verifications/:id/document handler passes a missing submission to next(err) as 404', async () => {
+    const adminRoutes = require('../routes/adminRoutes');
+    const layer = adminRoutes.stack.find((l) => l.route && l.route.path === '/verifications/:id/document');
+    const handler = layer.route.stack[0].handle;
+    const req = { user: { id: 'admin1' }, params: { id: 'no-such-id' } };
+    const next = jest.fn();
+    await handler(req, mockRes(), next);
+    expect(next.mock.calls[0][0]).toMatchObject({ status: 404, code: 'VERIFICATION_NOT_FOUND' });
+  });
+
+  test('GET /verifications/:id/document handler passes a public-bucket document to next(err) as 422', async () => {
+    db.verification_submissions.push({
+      id: 'legacy-public', farmer_id: 'farmer1',
+      document_path: 'product-items/farmer1-old.jpg', status: 'pending',
+    });
+    const adminRoutes = require('../routes/adminRoutes');
+    const layer = adminRoutes.stack.find((l) => l.route && l.route.path === '/verifications/:id/document');
+    const handler = layer.route.stack[0].handle;
+    const req = { user: { id: 'admin1' }, params: { id: 'legacy-public' } };
+    const next = jest.fn();
+    await handler(req, mockRes(), next);
+    expect(next.mock.calls[0][0]).toMatchObject({ status: 422, code: 'VALIDATION_ERROR' });
   });
 
   test('the admin guard rejects a non-admin before any handler runs', async () => {
