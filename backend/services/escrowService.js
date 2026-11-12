@@ -2,6 +2,8 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { AppError, notAccessible } = require('../utils/errors');
+const { logAudit } = require('../utils/auditLog');
+const notificationService = require('./notificationService');
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -93,7 +95,12 @@ async function fetchProfile(userId) {
     return getSingle(data);
 }
 
-exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey) => {
+exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey, opts = {}) => {
+    // opts.unitPriceOverride: negotiation acceptance passes the LOCKED
+    // price here instead of re-deriving it from the listing, so a later
+    // farmer price edit cannot change what the order charges. The
+    // override joins the idempotency hash, so the same key + a different
+    // locked price is a 422, not a silent replay.
     const { product_id, quantity, unit = 'kg', delivery_address, buyer_phone } = input;
     if (!product_id || quantity === undefined || quantity === null ||
         !delivery_address || !String(delivery_address).trim()) {
@@ -109,8 +116,14 @@ exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey) => 
     // constraint — a check-then-insert would race under retries.
     let requestHash = null;
     if (idempotencyKey) {
+        // The locked price joins the hash ONLY when an override is present:
+        // the no-override hash stays byte-identical to before, so existing
+        // checkout idempotency is untouched. Same key + a different locked
+        // price still hashes differently (422), never a silent replay.
+        const hashInput = { buyerId, product_id, quantity: qty, unit, delivery_address: address, buyer_phone: buyer_phone ? String(buyer_phone).trim() : '' };
+        if (opts.unitPriceOverride != null) hashInput.lockedUnitPrice = Number(opts.unitPriceOverride);
         requestHash = crypto.createHash('sha256')
-            .update(JSON.stringify({ buyerId, product_id, quantity: qty, unit, delivery_address: address, buyer_phone: buyer_phone ? String(buyer_phone).trim() : '' }))
+            .update(JSON.stringify(hashInput))
             .digest('hex');
         const { error: claimError } = await supabase.from('idempotency_keys')
             .insert({ key: idempotencyKey, user_id: buyerId, request_hash: requestHash, status: 'in_progress' })
@@ -158,7 +171,12 @@ exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey) => 
         if (Number(product.quantity) < qty * multiplier) {
             throw new AppError(409, 'INSUFFICIENT_STOCK', 'Insufficient stock for this order.');
         }
-        const unitPrice = Number(product.user_price ?? product.price);
+        const unitPrice = opts.unitPriceOverride != null
+            ? Number(opts.unitPriceOverride)
+            : Number(product.user_price ?? product.price);
+        if (opts.unitPriceOverride != null && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+            throw new AppError(422, 'VALIDATION_ERROR', 'Locked price must be a number greater than 0.');
+        }
         const total = unitPrice * qty * multiplier;
         if (!Number.isFinite(total) || total <= 0) {
             throw new AppError(409, 'AMOUNT_MISMATCH', 'This product has no valid price.');
@@ -193,6 +211,14 @@ exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey) => 
                 status: 'completed', response_status: 201, response_body: order,
             }).eq('key', idempotencyKey).eq('user_id', buyerId);
         }
+        await logAudit(buyerId, 'order.created', { order_id: order.id, product_id: product.id });
+        // Stage 9: buyer + farmer learn an order exists (best-effort —
+        // emit never throws into order creation).
+        await notificationService.emit({
+            eventId: `order:${order.id}:created`, type: 'order_created',
+            userIds: [buyerId, product.farmer_id],
+            payload: { order_id: order.id, total_price: total, quantity: qty, unit },
+        });
         return order;
     } catch (err) {
         // A failed attempt frees the key so the client can retry with it.
@@ -353,7 +379,18 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
         .update(updates).eq('id', order_id).eq('status', 'CONFIRMED').select('*');
     if (updateError) throw updateError;
     const paidOrder = getSingle(updated);
-    if (paidOrder) return paidOrder;
+    // Only the transition that actually flipped CONFIRMED -> PAID is
+    // logged; a replay (order already PAID) returns below without a row.
+    if (paidOrder) {
+        await logAudit(buyer_id, 'order.paid', { order_id });
+        // Stage 9: the farmer learns the order is paid.
+        await notificationService.emit({
+            eventId: `order:${order_id}:paid`, type: 'order_paid',
+            userIds: [order.farmer_id],
+            payload: { order_id, total_price: order.total_price },
+        });
+        return paidOrder;
+    }
 
     const latest = await fetchOrder(order_id);
     if (latest.status === 'PAID') return latest;
@@ -406,7 +443,15 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
             if (/INVALID_TRANSITION/.test(error.message)) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
             throw error;
         }
-        return getSingle(Array.isArray(data) ? data : data ? [data] : null);
+        const confirmed = getSingle(Array.isArray(data) ? data : data ? [data] : null);
+        await logAudit(farmerId, 'order.confirmed', { order_id: orderId });
+        // Stage 9: the buyer learns the farmer approved the order.
+        await notificationService.emit({
+            eventId: `order:${orderId}:confirmed`, type: 'order_confirmed',
+            userIds: [order.buyer_id],
+            payload: { order_id: orderId, total_price: order.total_price },
+        });
+        return confirmed;
     }
 
     const { data, error } = await supabase.from('orders').update({ status: newStatus })
@@ -414,6 +459,13 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
     if (error) throw error;
     const updated = getSingle(data);
     if (!updated) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
+    await logAudit(farmerId, 'order.declined', { order_id: orderId });
+    // Stage 9: the buyer learns the farmer declined the order.
+    await notificationService.emit({
+        eventId: `order:${orderId}:declined`, type: 'order_declined',
+        userIds: [order.buyer_id],
+        payload: { order_id: orderId, total_price: order.total_price },
+    });
     return updated;
 };
 
@@ -434,6 +486,13 @@ exports.markOrderAsShipped = async (order_id, farmer_id) => {
     if (!updated) {
         throw new AppError(409, 'ORDER_NOT_SHIPPABLE', 'Only a paid order can be shipped.');
     }
+    await logAudit(farmer_id, 'order.shipped', { order_id });
+    // Stage 9: the buyer learns the order shipped.
+    await notificationService.emit({
+        eventId: `order:${order_id}:shipped`, type: 'order_shipped',
+        userIds: [order.buyer_id],
+        payload: { order_id, total_price: order.total_price },
+    });
     return updated;
 };
 
@@ -451,9 +510,10 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
     // Capture the previous status BEFORE the update: the fetched row is a
     // live reference, so order.status changes once the update applies.
     const prevStatus = order.status;
+    const completedAt = new Date().toISOString();
     const { data, error: orderError } = await supabase
         .from('orders')
-        .update({ status: 'COMPLETED' })
+        .update({ status: 'COMPLETED', completed_at: completedAt })
         .eq('id', order_id)
         .in('status', ['PAID', 'SHIPPED'])
         .select('*');
@@ -471,20 +531,30 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
         .select('*');
     if (paymentError) {
         // The order is already COMPLETED — roll it back, otherwise the
-        // payment stays HELD forever with no reconciler (audit H2).
+        // payment stays HELD forever with no reconciler (audit H2). The
+        // completion timestamp is cleared too: the order never completed.
         const { error: rollbackError } = await supabase.from('orders')
-            .update({ status: prevStatus }).eq('id', order_id);
+            .update({ status: prevStatus, completed_at: null }).eq('id', order_id);
         if (rollbackError) console.error('Failed to roll back order after payment-release error:', rollbackError.message);
         throw paymentError;
     }
     if (!payData || payData.length === 0) {
         // No HELD payment to release — roll the order back and refuse.
+        // The completion timestamp is cleared with it.
         const { error: rollbackError } = await supabase.from('orders')
-            .update({ status: prevStatus }).eq('id', order_id);
+            .update({ status: prevStatus, completed_at: null }).eq('id', order_id);
         if (rollbackError) console.error('Failed to roll back order after unreleasable payment:', rollbackError.message);
         throw new AppError(409, 'ORDER_NOT_RELEASABLE', 'Only a paid or shipped order can be completed.');
     }
 
+    await logAudit(buyer_id, 'order.completed', { order_id });
+    // Stage 9: buyer + farmer learn the order completed (and the
+    // payment released).
+    await notificationService.emit({
+        eventId: `order:${order_id}:completed`, type: 'order_completed',
+        userIds: [order.buyer_id, order.farmer_id],
+        payload: { order_id, total_price: order.total_price },
+    });
     return updated;
 };
 
@@ -514,7 +584,25 @@ exports.markRefundPending = async (order_id, opts = {}) => {
         .eq('id', order_id)
         .select('*');
     if (error) throw error;
-    return getSingle(data);
+    // A null row is the idempotent no-op (already REFUND_PENDING, REFUNDED,
+    // COMPLETED or CREATED) — nothing changed, nothing to record. Only a
+    // manual (buyer) request is logged; the cron's enqueue is a system
+    // action covered by the order.refunded row when it completes.
+    const requested = getSingle(data);
+    if (requested && buyerId !== null) {
+        await logAudit(buyerId, 'order.refund_requested', { order_id });
+    }
+    // Stage 9: the farmer learns a refund was requested — manual AND
+    // cron-enqueued alike (a system enqueue is still a refund the
+    // farmer must know about). A null row (no transition) emits nothing.
+    if (requested) {
+        await notificationService.emit({
+            eventId: `order:${order_id}:refund_requested`, type: 'refund_requested',
+            userIds: [order.farmer_id],
+            payload: { order_id, total_price: order.total_price },
+        });
+    }
+    return requested;
 };
 
 // ---------------------------------------------------------------------------
@@ -542,6 +630,29 @@ async function completeRefundStatuses(order_id, gatewayRefundId, message) {
         .from('payments').update({ status: 'REFUNDED' }).eq('order_id', order_id).select('*');
     if (payErr) {
         throw Object.assign(new Error('Refund Failed: ' + payErr.message), { postGateway: true, gateway_refund_id: gatewayRefundId });
+    }
+    // The single completion point for every refund path (manual, cron,
+    // reconciler) — actor is null: the initiator is not known here, and
+    // the gateway refund id is the traceable handle.
+    await logAudit(null, 'order.refunded', { order_id, gateway_refund_id: gatewayRefundId });
+    // Stage 9: the buyer learns the refund completed. The buyer id is
+    // resolved from the order row here (this function only knows the
+    // order id) — a failed lookup emits nothing, never breaks the
+    // refund. A PARTIAL refund does not come through here (see
+    // refundPartialOrder): the dispute_resolved notification covers it.
+    try {
+        const { data: orderRows } = await supabase
+            .from('orders').select('buyer_id,total_price').eq('id', order_id);
+        const refundedOrder = getSingle(orderRows);
+        if (refundedOrder) {
+            await notificationService.emit({
+                eventId: `order:${order_id}:refunded`, type: 'refunded',
+                userIds: [refundedOrder.buyer_id],
+                payload: { order_id, total_price: refundedOrder.total_price },
+            });
+        }
+    } catch (err) {
+        console.error('Refund notification failed:', err.message);
     }
     return { success: true, message, gateway_refund_id: gatewayRefundId };
 }
@@ -759,6 +870,95 @@ exports.refundOrder = async (order_id) => {
         return { success: false, message: 'Refund not processed. The order is not awaiting a refund.', code: 'REFUND_NOT_PENDING', alreadyHandled: true };
     }
     return processClaimedRefund(order);
+};
+
+// 5c. Partial refund for a dispute resolution (Stage 7). Reuses the
+// Stage 0 gateway idempotency (findExistingGatewayRefund +
+// refundWithIdempotentRetry) and the refunds ledger, but does NOT touch
+// the order status or the payment row: a partial refund is not a full
+// refund, so the order stays PAID/SHIPPED and the payment stays HELD
+// for the remainder. The refunds table has UNIQUE(order_id), so one
+// order holds exactly one refund row: a later FULL refund on an order
+// that already had a partial refund is not supported by this ledger
+// (an admin handles it at the gateway directly).
+// shortcut: the payment row keeps the FULL amount HELD, so a later
+// markOrderAsCompleted releases the un-refunded remainder (the partial
+// amount is the only money returned). Revisit if partial refunds
+// become routine enough to track a remaining-held balance.
+exports.refundPartialOrder = async (order_id, amountPaise) => {
+    if (!Number.isInteger(amountPaise) || amountPaise <= 0) {
+        throw new AppError(422, 'VALIDATION_ERROR', 'amount_paise must be a positive integer.');
+    }
+    const order = await fetchOrder(order_id);
+    const { data: paymentData, error: fetchError } = await supabase
+        .from('payments').select('*').eq('order_id', order_id);
+    if (fetchError) throw fetchError;
+    const payment = getSingle(paymentData);
+    if (!payment) throw new AppError(409, 'REFUND_NOT_ELIGIBLE', 'This order has no payment to refund.');
+    if (!payment.razorpay_payment_id) throw new AppError(409, 'REFUND_NOT_ELIGIBLE', 'No Razorpay payment id stored for this order (cannot refund at gateway).');
+    const paidPaise = Math.round(Number(payment.amount || order.total_price) * 100);
+    if (amountPaise > paidPaise) {
+        throw new AppError(422, 'VALIDATION_ERROR', 'amount_paise cannot exceed the amount paid.');
+    }
+    let gatewayRefundId = null;
+    try {
+        // Pending ledger row FIRST (same as the full path): a retry finds
+        // this row and replays instead of double-refunding.
+        const { data: existing, error: refErr } = await supabase
+            .from('refunds').select('*').eq('order_id', order_id);
+        if (refErr) throw refErr;
+        const existingRefund = getSingle(existing);
+        if (existingRefund && existingRefund.gateway_refund_id) {
+            // Idempotent replay of the SAME partial amount; a different
+            // amount on an already-refunded order is a 409 (one refund
+            // row per order — see header).
+            if (Math.round(Number(existingRefund.amount) * 100) === amountPaise) {
+                return { success: true, message: 'Partial refund already processed', alreadyHandled: true, gateway_refund_id: existingRefund.gateway_refund_id, amount_paise: amountPaise };
+            }
+            throw new AppError(409, 'REFUND_ALREADY_EXISTS', 'This order already has a refund.');
+        }
+        if (!existingRefund) {
+            const { error: pendErr } = await supabase.from('refunds').insert({
+                order_id, gateway_refund_id: null, status: 'PENDING', amount: amountPaise / 100,
+            });
+            if (pendErr) {
+                if (pendErr.code === '23505' || String(pendErr.message || '').includes('duplicate key')) {
+                    const { data: dup, error: dupErr } = await supabase.from('refunds').select('*').eq('order_id', order_id);
+                    if (dupErr) throw dupErr;
+                    const dupRow = getSingle(dup);
+                    if (dupRow && dupRow.gateway_refund_id && Math.round(Number(dupRow.amount) * 100) === amountPaise) {
+                        return { success: true, message: 'Partial refund already processed', alreadyHandled: true, gateway_refund_id: dupRow.gateway_refund_id, amount_paise: amountPaise };
+                    }
+                    throw new AppError(409, 'REFUND_ALREADY_EXISTS', 'This order already has a refund.');
+                }
+                throw pendErr;
+            }
+        }
+        const existingGateway = await findExistingGatewayRefund(payment.razorpay_payment_id, amountPaise);
+        const refund = existingGateway
+            || await refundWithIdempotentRetry(payment.razorpay_payment_id, amountPaise);
+        gatewayRefundId = refund.id;
+        const { data: ledgerRows, error: ledgerErr } = await supabase.from('refunds')
+            .update({ gateway_refund_id: refund.id, status: 'REFUNDED', amount: amountPaise / 100 })
+            .eq('order_id', order_id).select('*');
+        if (ledgerErr) {
+            throw Object.assign(new Error('Refund Failed: ' + ledgerErr.message), { postGateway: true, gateway_refund_id: refund.id });
+        }
+        if (!ledgerRows || ledgerRows.length === 0) {
+            throw Object.assign(new Error('Refund Failed: ledger row missing for order'), { postGateway: true, gateway_refund_id: refund.id });
+        }
+        await logAudit(null, 'order.refunded', { order_id, gateway_refund_id: refund.id, amount_paise: amountPaise, partial: true });
+        return { success: true, message: 'Partial refund processed', gateway_refund_id: refund.id, amount_paise: amountPaise };
+    } catch (err) {
+        if (err instanceof AppError) throw err;
+        if (err && err.postGateway) {
+            throw Object.assign(
+                new Error('Refund Failed: ' + err.message),
+                { postGateway: true, gateway_refund_id: err.gateway_refund_id || gatewayRefundId }
+            );
+        }
+        throw new Error('Refund Failed: ' + err.message);
+    }
 };
 
 // 5b. Reconcile orders stuck in REFUND_RECONCILE: the gateway refund
