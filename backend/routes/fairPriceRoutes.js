@@ -16,7 +16,10 @@
 //   (writes stay admin-only, on /api/admin/cost-params).
 // GET /alerts — the caller's own price alerts (requireAuth).
 // POST /alerts — create a price alert (requireAuth). Body
-//   { commodity, threshold_pct, basis, direction }.
+//   { commodity, threshold_pct, basis, direction }. At most 20 alerts
+//   per user (409 ALERT_LIMIT_REACHED at the cap).
+// DELETE /alerts/:id — delete the caller's own alert (requireAuth).
+//   Another user's alert (or a missing one) is the same 404.
 // NOTE: /alerts and /cost-params are defined BEFORE /:commodity —
 // Express would otherwise match "alerts" / "cost-params" as a
 // commodity name.
@@ -96,6 +99,15 @@ async function createAlertHandler(req, res, next) {
   }
 }
 
+async function deleteAlertHandler(req, res, next) {
+  try {
+    const alert = await fairPriceService.deleteAlert(req.user.id, req.params.id);
+    return res.status(200).json({ alert });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function listCostParamsHandler(req, res, next) {
   try {
     const params = await fairPriceService.listCostParams();
@@ -169,6 +181,7 @@ async function netEarningsHandler(req, res, next) {
 
 router.get('/alerts', rateLimit({ max: 30 }), requireAuth, listAlertsHandler);
 router.post('/alerts', rateLimit({ max: 30 }), requireAuth, createAlertHandler);
+router.delete('/alerts/:id', rateLimit({ max: 30 }), requireAuth, deleteAlertHandler);
 router.get('/cost-params', rateLimit({ max: 60 }), listCostParamsHandler);
 router.get('/:commodity/net-earnings', rateLimit({ max: 60 }), netEarningsHandler);
 router.get('/:commodity/history', rateLimit({ max: 60 }), historyHandler);
