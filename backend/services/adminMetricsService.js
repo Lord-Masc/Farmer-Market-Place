@@ -32,6 +32,12 @@ const CAPTURED_PAYMENT_STATUSES = ['HELD', 'RELEASED'];
 const KNOWN_STUCK_CATEGORIES = ['confirmed_unpaid', 'completed_held', 'refund_reconcile'];
 const DELIVERED_STATUSES = ['DELIVERED', 'COMPLETED'];
 
+// Small-N suppression (audit finding 8): on the PUBLIC path an exact
+// amount or rate computed from fewer than MIN_POPULATION underlying
+// rows leaks a single order's private value, so it is null instead.
+// The admin path (no flag) always returns the exact values.
+const MIN_POPULATION = 5;
+
 // Same table-missing detector as the Stage 8 price tool: PostgREST
 // 42P01 / PGRST205, or a "does not exist" message.
 function isTableMissing(error) {
@@ -84,7 +90,7 @@ async function getMandiModalPaise() {
   }
 }
 
-async function getPlatformMetrics() {
+async function getPlatformMetrics({ suppressSmallN = false } = {}) {
   const [orders, payments, groups, participants, notifications, disputes] = await Promise.all([
     fetchAll('orders', 'id,total_price,quantity,status,created_at,completed_at,delivery_deadline'),
     fetchAll('payments', 'order_id,status'),
@@ -105,7 +111,9 @@ async function getPlatformMetrics() {
     .map((d) => (new Date(d.resolved_at).getTime() - new Date(d.created_at).getTime()) / 3600000);
   const avgResolutionHours = resolutionHours.length === 0
     ? null
-    : Math.round((resolutionHours.reduce((a, b) => a + b, 0) / resolutionHours.length) * 100) / 100;
+    : (suppressSmallN && resolutionHours.length < MIN_POPULATION
+      ? null
+      : Math.round((resolutionHours.reduce((a, b) => a + b, 0) / resolutionHours.length) * 100) / 100);
   const mandiModalPaise = await getMandiModalPaise();
 
   const paidOrderIds = new Set(
@@ -117,7 +125,9 @@ async function getPlatformMetrics() {
 
   const gmvPaise = paidOrders.length === 0
     ? null
-    : paidOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0);
+    : (suppressSmallN && paidOrders.length < MIN_POPULATION
+      ? null
+      : paidOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0));
   const realisations = paidOrders
     .map((o) => {
       const qty = Number(o.quantity);
@@ -125,15 +135,22 @@ async function getPlatformMetrics() {
       return Math.round((Number(o.total_price) * 100) / qty);
     })
     .filter((v) => v !== null);
+  const medianRealisation = suppressSmallN && paidOrders.length < MIN_POPULATION
+    ? null
+    : median(realisations);
 
-  const disputeRate = orders.length === 0 ? null : round4(disputeCount / orders.length);
+  const disputeRate = orders.length === 0
+    ? null
+    : (suppressSmallN && orders.length < MIN_POPULATION ? null : round4(disputeCount / orders.length));
 
   const eligible = orders.filter(
     (o) => DELIVERED_STATUSES.includes(o.status) && o.delivery_deadline && o.completed_at,
   );
   const onTimeRate = eligible.length === 0
     ? null
-    : round4(eligible.filter((o) => new Date(o.completed_at) <= new Date(o.delivery_deadline)).length / eligible.length);
+    : (suppressSmallN && eligible.length < MIN_POPULATION
+      ? null
+      : round4(eligible.filter((o) => new Date(o.completed_at) <= new Date(o.delivery_deadline)).length / eligible.length));
 
   const closedGroups = groups.filter((g) => g.status === 'closed');
   const closedIds = new Set(closedGroups.map((g) => g.id));
@@ -146,7 +163,9 @@ async function getPlatformMetrics() {
     .filter(Boolean);
   const pooledGmvPaise = linkedOrders.length === 0
     ? null
-    : linkedOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0);
+    : (suppressSmallN && linkedOrders.length < MIN_POPULATION
+      ? null
+      : linkedOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0));
 
   const notificationDelivery = { sent: 0, failed: 0, deferred: 0, pending: 0 };
   for (const n of notifications) {
@@ -158,7 +177,7 @@ async function getPlatformMetrics() {
   return {
     total_orders: orders.length,
     gmv_paise: gmvPaise,
-    median_realisation_paise: median(realisations),
+    median_realisation_paise: medianRealisation,
     mandi_modal_paise: mandiModalPaise,
     dispute_rate: disputeRate,
     dispute_count: disputeCount,

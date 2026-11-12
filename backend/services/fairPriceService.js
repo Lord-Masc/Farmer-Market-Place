@@ -389,6 +389,16 @@ function computeNetEarnings({ modalPriceRupees, quantityQuintals, costParams }) 
 // direction. An alert never re-fires on the same data date —
 // last_triggered_date guards it. With no history there is no reference
 // and nothing fires ("once history exists").
+//
+// Per-user cap (audit finding 11): at most MAX_ALERTS_PER_USER alerts
+// per user — the service count-check is the user-facing 409, and a DB
+// insert trigger is the atomic backstop for concurrent creates (the
+// trigger is a sibling migration, not this service). Alerts are
+// evaluated once per distinct commodity per sync, not once per alert
+// row, so a user with many alerts on one commodity costs one
+// latest-price + one history fetch for that commodity.
+
+const MAX_ALERTS_PER_USER = 20;
 
 function validateAlertInput({ commodity, threshold_pct, basis, direction }) {
   const name = normaliseCommodity(commodity);
@@ -401,6 +411,13 @@ function validateAlertInput({ commodity, threshold_pct, basis, direction }) {
 }
 
 async function createAlert(userId, input) {
+  // Per-user cap, counted first: at the cap the answer is the 409,
+  // not a validation error on the (possibly valid) input.
+  const { count } = await supabaseAdmin.from('price_alerts')
+    .select('id', { count: 'exact', head: true }).eq('user_id', userId);
+  if ((count || 0) >= MAX_ALERTS_PER_USER) {
+    throw new AppError(409, 'ALERT_LIMIT_REACHED', 'You can create at most 20 price alerts. Delete one to add another.');
+  }
   const row = validateAlertInput(input);
   const { data, error } = await supabaseAdmin.from('price_alerts')
     .insert([{ user_id: userId, ...row }]).select().single();
@@ -418,6 +435,17 @@ async function listAlerts(userId) {
   return data || [];
 }
 
+// DELETE an alert — owner-scoped. A missing row (or another user's
+// row) is the same generic 404: no existence/ownership oracle.
+async function deleteAlert(userId, alertId) {
+  const { data, error } = await supabaseAdmin.from('price_alerts')
+    .delete().eq('id', alertId).eq('user_id', userId).select('*');
+  if (error) throw error;
+  const row = (data || [])[0];
+  if (!row) throw new AppError(404, 'ALERT_NOT_FOUND', 'Price alert not found.');
+  return row;
+}
+
 // Evaluate every alert against the freshest data. Returns
 // { evaluated, fired: [{ alertId, userId, commodity, change_pct,
 //   latest_price, reference_price, date }] }. A fired alert is stamped
@@ -431,42 +459,51 @@ async function evaluateAlerts() {
     throw error;
   }
   const fired = [];
+  // One price fetch per distinct commodity per sync: alerts sharing a
+  // commodity are evaluated against the same latest price + history.
+  const byCommodity = new Map();
   for (const alert of alerts || []) {
-    const latest = await getLatestPrice(alert.commodity);
+    if (!byCommodity.has(alert.commodity)) byCommodity.set(alert.commodity, []);
+    byCommodity.get(alert.commodity).push(alert);
+  }
+  for (const [commodity, group] of byCommodity) {
+    const latest = await getLatestPrice(commodity);
     if (!latest || !latest.primary) continue;
-    const history = await getHistory(alert.commodity, { days: 9 });
-    let reference = null;
-    if (alert.basis === 'yesterday') {
-      const s = history.series;
-      if (s.length >= 2) reference = s[s.length - 2].modal_price;
-    } else {
-      reference = history.avg7_modal;
+    const history = await getHistory(commodity, { days: 9 });
+    for (const alert of group) {
+      let reference = null;
+      if (alert.basis === 'yesterday') {
+        const s = history.series;
+        if (s.length >= 2) reference = s[s.length - 2].modal_price;
+      } else {
+        reference = history.avg7_modal;
+      }
+      if (reference === null || reference === undefined || reference <= 0) continue;
+      const latestPrice = latest.primary.modal_price;
+      const change = ((latestPrice - reference) / reference) * 100;
+      const crossed = alert.direction === 'rise'
+        ? change >= alert.threshold_pct
+        : change <= -alert.threshold_pct;
+      if (!crossed) continue;
+      if (alert.last_triggered_date === latest.date) continue;
+      const { error: stampError } = await supabaseAdmin.from('price_alerts')
+        .update({
+          last_triggered_at: new Date().toISOString(),
+          last_triggered_price: latestPrice,
+          last_triggered_date: latest.date,
+        })
+        .eq('id', alert.id);
+      if (stampError) throw stampError;
+      fired.push({
+        alertId: alert.id,
+        userId: alert.user_id,
+        commodity: alert.commodity,
+        change_pct: round2(change),
+        latest_price: latestPrice,
+        reference_price: reference,
+        date: latest.date,
+      });
     }
-    if (reference === null || reference === undefined || reference <= 0) continue;
-    const latestPrice = latest.primary.modal_price;
-    const change = ((latestPrice - reference) / reference) * 100;
-    const crossed = alert.direction === 'rise'
-      ? change >= alert.threshold_pct
-      : change <= -alert.threshold_pct;
-    if (!crossed) continue;
-    if (alert.last_triggered_date === latest.date) continue;
-    const { error: stampError } = await supabaseAdmin.from('price_alerts')
-      .update({
-        last_triggered_at: new Date().toISOString(),
-        last_triggered_price: latestPrice,
-        last_triggered_date: latest.date,
-      })
-      .eq('id', alert.id);
-    if (stampError) throw stampError;
-    fired.push({
-      alertId: alert.id,
-      userId: alert.user_id,
-      commodity: alert.commodity,
-      change_pct: round2(change),
-      latest_price: latestPrice,
-      reference_price: reference,
-      date: latest.date,
-    });
   }
   return { evaluated: (alerts || []).length, fired };
 }
@@ -606,6 +643,7 @@ module.exports = {
   validateAlertInput,
   createAlert,
   listAlerts,
+  deleteAlert,
   evaluateAlerts,
   listCostParams,
   createCostParams,

@@ -609,6 +609,32 @@ exports.markRefundPending = async (order_id, opts = {}) => {
 // Refund processing (2026-11-08 security fix — reliability contract)
 // ---------------------------------------------------------------------------
 
+// Partial-refund guard (audit finding 2): the refunds ledger holds ONE
+// row per order (UNIQUE(order_id)) with amount in RUPEES, so a partial
+// row is indistinguishable from a full row unless the amount is
+// compared to the order total. A row with a gateway refund id whose
+// amount is LESS than the full order total is a completed partial
+// refund: the remainder can only be refunded at the gateway directly,
+// never through the full-refund path. Returns the row iff it is a
+// completed partial refund, else null.
+async function findPartialRefundRow(order_id, fullAmountPaise) {
+    const { data, error } = await supabase
+        .from('refunds')
+        .select('*')
+        .eq('order_id', order_id);
+    if (error) throw error;
+    const row = getSingle(data);
+    if (!row || !row.gateway_refund_id) return null;
+    return Math.round(Number(row.amount) * 100) < fullAmountPaise ? row : null;
+}
+
+function partialRefundError() {
+    return new AppError(409, 'REFUND_ALREADY_EXISTS', 'This order already has a partial refund. The remaining amount must be refunded at the gateway directly.');
+}
+
+exports.findPartialRefundRow = findPartialRefundRow;
+exports.partialRefundError = partialRefundError;
+
 // Complete the post-gateway statuses. Every write is checked — a failure is
 // thrown (post-gateway) instead of reported as success. The payment update
 // tolerates a missing payment row (legacy data): the money is refunded and
@@ -756,6 +782,14 @@ async function processClaimedRefund(order) {
         if (refErr) throw refErr;
         const existingRefund = getSingle(existing);
         if (existingRefund && existingRefund.gateway_refund_id) {
+            // A completed PARTIAL refund must never replay as a full one:
+            // the order would flip to REFUNDED while only partially
+            // refunded. Give the claim back and fail loudly instead.
+            const partial = await findPartialRefundRow(order_id, Math.round(Number(order.total_price) * 100));
+            if (partial) {
+                await supabase.from('orders').update({ status: 'REFUND_PENDING' }).eq('id', order_id);
+                throw partialRefundError();
+            }
             return await completeRefundStatuses(order_id, existingRefund.gateway_refund_id, 'Refund already processed');
         }
         if (!existingRefund) {
@@ -775,6 +809,13 @@ async function processClaimedRefund(order) {
                     if (dupErr) throw dupErr;
                     const dupRow = getSingle(dup);
                     if (dupRow && dupRow.gateway_refund_id) {
+                        // Same partial-refund guard as the first replay
+                        // branch (defence in depth for the race window).
+                        const partial = await findPartialRefundRow(order_id, Math.round(Number(order.total_price) * 100));
+                        if (partial) {
+                            await supabase.from('orders').update({ status: 'REFUND_PENDING' }).eq('id', order_id);
+                            throw partialRefundError();
+                        }
                         return await completeRefundStatuses(order_id, dupRow.gateway_refund_id, 'Refund already processed');
                     }
                     // A PENDING row exists but no gateway id yet — proceed to
@@ -818,6 +859,11 @@ async function processClaimedRefund(order) {
         // 5. Complete the statuses (errors checked — never silent success).
         return await completeRefundStatuses(order_id, refund.id, 'Refund Processed (Status Updated)');
     } catch (err) {
+        // A deliberate 409 (e.g. the partial-refund guard above) is not
+        // a failure of this refund: it passes through untouched, and the
+        // order status was already restored by the branch that threw it
+        // — never REFUND_FAILED, never REFUND_RECONCILE.
+        if (err instanceof AppError) throw err;
         // Post-gateway failures: the money already left at the gateway, so
         // the order goes to REFUND_RECONCILE (never a terminal state) with
         // the gateway refund id preserved for the reconciler.
@@ -848,6 +894,14 @@ async function processClaimedRefund(order) {
 // answer: success=true only when the refund already completed earlier;
 // any other state is success=false with a code (the refund did not happen).
 exports.refundOrder = async (order_id) => {
+    // A completed partial refund blocks the full path BEFORE the claim:
+    // the remainder is gateway-only, and the order must never flip to
+    // REFUNDED while only partially refunded.
+    const orderForCheck = await fetchOrder(order_id);
+    const partial = await findPartialRefundRow(order_id, Math.round(Number(orderForCheck.total_price) * 100));
+    if (partial) {
+        return { success: false, message: partialRefundError().message, code: 'REFUND_ALREADY_EXISTS', alreadyHandled: true };
+    }
     const { data: claimed, error: claimError } = await supabase
         .from('orders')
         .update({ status: 'REFUND_PROCESSING' })
@@ -990,6 +1044,14 @@ async function reconcileOneRefund(order) {
     if (refErr) throw refErr;
     const refund = getSingle(existing);
     let gatewayRefundId = refund && refund.gateway_refund_id;
+
+    // A completed partial refund must never reconcile into a full one:
+    // the order stays stuck (REFUND_RECONCILE) for a human to handle at
+    // the gateway directly, never flips to REFUNDED.
+    const partial = await findPartialRefundRow(order_id, Math.round(Number(order.total_price) * 100));
+    if (partial) {
+        throw new Error('Cannot reconcile: existing refund is partial; handle at the gateway directly');
+    }
 
     if (!gatewayRefundId) {
         // No gateway id on the ledger: find it at the gateway by listing the
