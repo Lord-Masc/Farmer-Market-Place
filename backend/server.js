@@ -4,9 +4,20 @@ const orderRoutes = require('./routes/orderRoutes');
 const marketplaceOrders = require('./routes/marketplaceOrders');
 const uploadRoutes = require('./routes/uploadRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const verificationRoutes = require('./routes/verificationRoutes');
+const passportRoutes = require('./routes/passportRoutes');
+const negotiationRoutes = require('./routes/negotiationRoutes');
+const groupBuyRoutes = require('./routes/groupBuyRoutes');
+const logisticsRoutes = require('./routes/logisticsRoutes');
+const transporterRoutes = require('./routes/transporterRoutes');
+const disputeRoutes = require('./routes/disputeRoutes');
+const assistantRoutes = require('./routes/assistantRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const cron = require('node-cron');
 const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
 const { reconcileUnpaidOrders } = require('./jobs/reconcile');
+const { processPending: processPendingNotifications } = require('./jobs/notificationWorker');
 const { corsMiddleware, securityHeaders, rateLimit } = require('./middleware/security');
 const { errorHandler } = require('./utils/errors');
 
@@ -41,6 +52,16 @@ app.use(rateLimit());
 app.use('/api/escrow', rateLimit({ max: 100 }), orderRoutes);
 app.use('/api/orders', rateLimit({ max: 60 }), marketplaceOrders); // Order creation (Stage 0, M2)
 app.use('/api/uploads', express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '5mb' }), rateLimit({ max: 30 }), uploadRoutes);
+app.use('/api/admin', rateLimit({ max: 100 }), adminRoutes); // Admin review + roles (Stage 1)
+app.use('/api/verification', rateLimit({ max: 60 }), verificationRoutes); // Farmer verification submit (Stage 1)
+app.use('/api', rateLimit({ max: 60 }), passportRoutes); // Crop passports (Stage 2, module A)
+app.use('/api', rateLimit({ max: 60 }), negotiationRoutes); // Negotiation (Stage 4, module C)
+app.use('/api/group-buys', rateLimit({ max: 60 }), groupBuyRoutes); // Smart group selling (Stage 5, module D)
+app.use('/api/shipments', rateLimit({ max: 60 }), logisticsRoutes); // Logistics & delivery (Stage 6, module E)
+app.use('/api/transporters', rateLimit({ max: 60 }), transporterRoutes); // Transporter registration (Stage 6, module E)
+app.use('/api', rateLimit({ max: 60 }), disputeRoutes); // Disputes & trust (Stage 7, module F)
+app.use('/api/assistant', assistantRoutes); // AI farmer assistant (Stage 8, module G; chat 30 / voice 10 limits live on the routes)
+app.use('/api/notifications', notificationRoutes); // Notifications & communication (Stage 9, module H; per-route limits live in the router)
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -67,6 +88,17 @@ cron.schedule('*/30 * * * *', async () => {
     console.log('Running Unpaid-Order Reconciliation Job...');
     const counts = await reconcileUnpaidOrders();
     console.log('Reconciliation result:', counts);
+});
+
+// Deliver pending notifications (every 5 minutes): email/sms rows emit()
+// left 'pending' (in-app rows are already 'sent' — the inbox IS the
+// delivery). The worker re-checks preferences and quiet hours before
+// every attempt and retries failures with backoff, so a run that finds
+// nothing due is a cheap no-op.
+cron.schedule('*/5 * * * *', async () => {
+    console.log('Running Notification Delivery Job...');
+    const counts = await processPendingNotifications();
+    console.log('Notification delivery result:', counts);
 });
 
 app.listen(PORT, () => {
