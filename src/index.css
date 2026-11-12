@@ -13,6 +13,12 @@
     overflow-x: hidden;
     color: #4a4a4a;
   }
+  /* Visible keyboard focus on every interactive element (WCAG 2.4.7).
+     Green-mid on cream is ~5.9:1, above the 3:1 focus-indicator floor. */
+  :focus-visible {
+    outline: 2px solid #2d6a4f;
+    outline-offset: 2px;
+  }
 }
 
 .reveal {
