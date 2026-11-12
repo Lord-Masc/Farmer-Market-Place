@@ -18,6 +18,8 @@ import GroupBuys from './pages/GroupBuys';
 import GroupBuyDetail from './pages/GroupBuyDetail';
 import Transporters from './pages/Transporters';
 import ShipmentTracking from './pages/ShipmentTracking';
+import Disputes from './pages/Disputes';
+import DisputeDetail from './pages/DisputeDetail';
 import VerificationQueue from './pages/admin/VerificationQueue';
 import Checkout from './pages/Checkout';
 import EscrowTest from './pages/EscrowTest';
@@ -41,6 +43,8 @@ function App() {
             <Route path="/group-buys/:id" element={<GroupBuyDetail />} />
             <Route path="/transporters" element={<Transporters />} />
             <Route path="/shipments/:id/track" element={<ShipmentTracking />} />
+            <Route path="/disputes" element={<Disputes />} />
+            <Route path="/disputes/:id" element={<DisputeDetail />} />
             <Route path="/farmer-dashboard" element={<FarmerDashboard />} />
             <Route path="/buyer-dashboard" element={<BuyerDashboard />} />
             <Route path="/spent-analysis" element={<SpentAnalysis />} />
