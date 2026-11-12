@@ -11,6 +11,7 @@ const negotiationRoutes = require('./routes/negotiationRoutes');
 const groupBuyRoutes = require('./routes/groupBuyRoutes');
 const logisticsRoutes = require('./routes/logisticsRoutes');
 const transporterRoutes = require('./routes/transporterRoutes');
+const disputeRoutes = require('./routes/disputeRoutes');
 const cron = require('node-cron');
 const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
 const { reconcileUnpaidOrders } = require('./jobs/reconcile');
@@ -55,6 +56,7 @@ app.use('/api', rateLimit({ max: 60 }), negotiationRoutes); // Negotiation (Stag
 app.use('/api/group-buys', rateLimit({ max: 60 }), groupBuyRoutes); // Smart group selling (Stage 5, module D)
 app.use('/api/shipments', rateLimit({ max: 60 }), logisticsRoutes); // Logistics & delivery (Stage 6, module E)
 app.use('/api/transporters', rateLimit({ max: 60 }), transporterRoutes); // Transporter registration (Stage 6, module E)
+app.use('/api', rateLimit({ max: 60 }), disputeRoutes); // Disputes & trust (Stage 7, module F)
 
 // Health Check
 app.get('/health', (req, res) => {
