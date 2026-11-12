@@ -211,6 +211,86 @@ export async function getShipmentTrack(id) {
   return shipmentFetch(`/${id}/track`);
 }
 
+// Disputes (Stage 7, module F). Request bodies use the repo's house
+// style (snake_case): order_id, category, description, status, outcome,
+// amount_paise, note, body. Money arrives in integer paise — callers
+// render it as rupees (paise / 100). Every dispute response carries
+// is_overdue; evidence entries carry a 5-minute signed url — callers
+// never construct a storage URL themselves.
+export async function disputeFetch(path, opts = {}) {
+  return authedFetch('/api/disputes', path, opts);
+}
+
+// Admin dispute actions (/api/admin/disputes/:id/*).
+export async function adminDisputeFetch(path, opts = {}) {
+  return authedFetch('/api/admin', path, opts);
+}
+
+export async function listDisputes(status) {
+  return disputeFetch(status ? `?status=${encodeURIComponent(status)}` : '/');
+}
+
+export async function getDispute(id) {
+  return disputeFetch(`/${id}`);
+}
+
+export async function createDispute(body) {
+  return disputeFetch('/', { method: 'POST', body });
+}
+
+export async function postDisputeMessage(id, body) {
+  return disputeFetch(`/${id}/message`, { method: 'POST', body });
+}
+
+export async function setDisputeStatus(id, body) {
+  return adminDisputeFetch(`/disputes/${id}/status`, { method: 'POST', body });
+}
+
+export async function resolveDispute(id, body) {
+  return adminDisputeFetch(`/disputes/${id}/resolve`, { method: 'POST', body });
+}
+
+export async function getDisputeStats() {
+  // Aggregates only, but the route sits behind requireAuth — every viewer
+  // of the Disputes page is logged in, so the authed fetch is correct.
+  // resolution_rate / avg_resolution_hours are NULL when nothing is
+  // resolved yet; callers render "No disputes yet", never an invented 0.
+  return disputeFetch('/stats');
+}
+
+// Dispute evidence upload (multipart, field `file`, image only — the
+// backend 422s non-images; the client checks the MIME type first as a
+// hint only). FormData sets its own Content-Type (boundary), so no
+// Content-Type header here — unlike authedFetch.
+export async function uploadDisputeEvidence(id, file) {
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error('Please log in to continue.');
+  }
+
+  const form = new FormData();
+  form.append('file', file);
+
+  const res = await fetch(`${ESCROW_API_URL}/api/disputes/${id}/evidence`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: form,
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const error = new Error(data.error || data.message || `Upload failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+
+  return data;
+}
+
 // Delivery-proof upload (/api/uploads/image?kind=proof): same raw-body
 // upload as uploadVerificationDocument, returns the storage path too —
 // the transporter submits that path (not just the URL) to verify-otp.
