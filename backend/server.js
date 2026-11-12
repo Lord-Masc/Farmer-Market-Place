@@ -6,6 +6,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const verificationRoutes = require('./routes/verificationRoutes');
+const passportRoutes = require('./routes/passportRoutes');
 const cron = require('node-cron');
 const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
 const { reconcileUnpaidOrders } = require('./jobs/reconcile');
@@ -45,6 +46,7 @@ app.use('/api/orders', rateLimit({ max: 60 }), marketplaceOrders); // Order crea
 app.use('/api/uploads', express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '5mb' }), rateLimit({ max: 30 }), uploadRoutes);
 app.use('/api/admin', rateLimit({ max: 100 }), adminRoutes); // Admin review + roles (Stage 1)
 app.use('/api/verification', rateLimit({ max: 60 }), verificationRoutes); // Farmer verification submit (Stage 1)
+app.use('/api', rateLimit({ max: 60 }), passportRoutes); // Crop passports (Stage 2, module A)
 
 // Health Check
 app.get('/health', (req, res) => {
