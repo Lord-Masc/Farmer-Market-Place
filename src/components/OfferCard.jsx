@@ -39,7 +39,7 @@ const OfferCard = ({ offer, canCounter, canAccept, onCounter, onAccept, busy }) 
 
       {tiers.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Quantity tiers</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Quantity tiers</p>
           <ul className="text-sm text-[#4a4a4a] space-y-1">
             {tiers.map((tier, i) => {
               const minQty = tier.min_quantity ?? tier.quantity ?? tier.from;
@@ -86,7 +86,7 @@ const OfferCard = ({ offer, canCounter, canAccept, onCounter, onAccept, busy }) 
         </div>
       )}
       {farmerId && (
-        <p className="text-[10px] text-gray-400 font-bold uppercase mt-3">Farmer ID: {String(farmerId).slice(0, 8)}</p>
+        <p className="text-[10px] text-gray-600 font-bold uppercase mt-3">Farmer ID: {String(farmerId).slice(0, 8)}</p>
       )}
     </div>
   );

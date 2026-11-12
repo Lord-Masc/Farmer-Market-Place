@@ -32,35 +32,35 @@ const PlatformMetrics = ({ metrics }) => {
       {/* Key metric cards */}
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-10">
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Total orders</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Total orders</p>
           <p className="text-2xl font-black text-green-deep">{formatCount(metrics.total_orders)}</p>
         </div>
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">GMV</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">GMV</p>
           <p className="text-2xl font-black text-green-deep">{formatRupees(metrics.gmv_paise)}</p>
         </div>
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Median farmer realisation</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Median farmer realisation</p>
           <p className="text-2xl font-black text-green-deep">{formatRupees(metrics.median_realisation_paise)}</p>
         </div>
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Dispute rate</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Dispute rate</p>
           <p className="text-2xl font-black text-green-deep">{formatRate(metrics.dispute_rate)}</p>
         </div>
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Disputes</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Disputes</p>
           <p className="text-2xl font-black text-green-deep">{formatCount(metrics.dispute_count)}</p>
         </div>
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Avg. resolution time</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Avg. resolution time</p>
           <p className="text-2xl font-black text-green-deep">{formatHours(metrics.avg_resolution_hours)}</p>
         </div>
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">On-time delivery rate</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">On-time delivery rate</p>
           <p className="text-2xl font-black text-green-deep">{formatRate(metrics.on_time_rate)}</p>
         </div>
         <div className="bg-white rounded-[24px] p-6 shadow-sm">
-          <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Mandi modal price</p>
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Mandi modal price</p>
           <p className="text-2xl font-black text-green-deep">{formatRupees(metrics.mandi_modal_paise)}</p>
         </div>
       </section>
@@ -90,7 +90,7 @@ const PlatformMetrics = ({ metrics }) => {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                <tr className="text-[10px] font-black uppercase text-gray-600 tracking-widest">
                   <th className="py-3 pr-4">Groups total</th>
                   <th className="py-3 pr-4">Groups closed</th>
                   <th className="py-3 pr-4">Pooled quantity</th>
@@ -119,7 +119,7 @@ const PlatformMetrics = ({ metrics }) => {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                <tr className="text-[10px] font-black uppercase text-gray-600 tracking-widest">
                   <th className="py-3 pr-4">Sent</th>
                   <th className="py-3 pr-4">Failed</th>
                   <th className="py-3 pr-4">Deferred</th>

@@ -74,21 +74,21 @@ const DeliveryProof = ({ shipmentId, orderId, onDelivered }) => {
       <p className="text-sm text-gray-500 mb-6">Upload a photo of the handover, then enter the OTP the buyer shows you. Both are required.</p>
       <form onSubmit={handleVerify} className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <label className="text-xs font-bold uppercase text-gray-400">Proof photo</label>
-          <input type="file" accept="image/*" className="w-full bg-cream rounded-xl p-4 mt-1" onChange={(e) => { setFile(e.target.files?.[0] || null); setPhotoPath(''); setUploadError(''); }} />
+          <label className="text-xs font-bold uppercase text-gray-600" htmlFor="proof-photo">Proof photo</label>
+          <input id="proof-photo" type="file" accept="image/*" className="w-full bg-cream rounded-xl p-4 mt-1" onChange={(e) => { setFile(e.target.files?.[0] || null); setPhotoPath(''); setUploadError(''); }} />
           {file && !photoPath && (
             <button type="button" onClick={() => void handleUpload()} disabled={uploading} className="mt-3 bg-green-deep text-white font-bold px-5 py-3 rounded-xl disabled:opacity-50">
               {uploading ? 'Uploading...' : 'Upload photo'}
             </button>
           )}
           {photoPath && <p className="text-sm font-bold text-green-mid mt-3">Photo uploaded.</p>}
-          {uploadError && <p className="text-sm text-red-600 mt-2">{uploadError}</p>}
+          {uploadError && <p aria-live="polite" className="text-sm text-red-600 mt-2">{uploadError}</p>}
         </div>
         <div>
-          <label className="text-xs font-bold uppercase text-gray-400">Delivery OTP</label>
-          <input className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="6-digit OTP from the buyer" value={otp} onChange={(e) => setOtp(e.target.value)} />
+          <label className="text-xs font-bold uppercase text-gray-600" htmlFor="delivery-otp">Delivery OTP</label>
+          <input id="delivery-otp" className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="6-digit OTP from the buyer" value={otp} onChange={(e) => setOtp(e.target.value)} />
         </div>
-        {error && <p className="md:col-span-2 text-sm text-red-600">{error}</p>}
+        {error && <p aria-live="polite" className="md:col-span-2 text-sm text-red-600">{error}</p>}
         <button type="submit" disabled={busy || !photoPath || !otp.trim()} className="md:col-span-2 bg-green-deep text-white font-black py-4 rounded-xl disabled:opacity-50">
           {busy ? 'Verifying...' : 'Confirm Delivery'}
         </button>

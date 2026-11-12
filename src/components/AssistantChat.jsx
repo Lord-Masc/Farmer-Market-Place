@@ -37,7 +37,7 @@ function SourceList({ sources }) {
   if (!Array.isArray(sources) || sources.length === 0) return null;
   return (
     <div className="mt-3 pt-3 border-t border-cream-dark">
-      <p className="text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1">Sources:</p>
+      <p className="text-[10px] font-black uppercase tracking-wider text-gray-600 mb-1">Sources:</p>
       <ul className="space-y-1">
         {sources.map((source, i) => (
           <li key={`${source?.type || 'source'}-${source?.id || i}`} className="text-xs text-gray-500">
@@ -186,16 +186,17 @@ const AssistantChat = () => {
               )}
             </div>
           ))}
-          {sending && <p className="text-gray-400 italic text-sm">Soch raha hoon… (Thinking…)</p>}
+          {sending && <p className="text-gray-600 italic text-sm">Soch raha hoon… (Thinking…)</p>}
         </div>
       )}
 
-      {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
+      {error && <p aria-live="polite" className="text-sm text-red-600 mb-4">{error}</p>}
       {voiceNote && <p className="text-sm text-amber-700 bg-amber/10 border border-amber/40 rounded-xl px-4 py-3 mb-4">{voiceNote}</p>}
 
       <form onSubmit={handleSubmit} className="flex gap-2">
         <input
           className="flex-1 bg-cream rounded-xl p-4"
+          aria-label="Type your question"
           placeholder="Apna sawaal yahan likhein… (Type your question…)"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -214,7 +215,7 @@ const AssistantChat = () => {
           {sending ? '…' : 'भेजें (Send)'}
         </button>
       </form>
-      <p className="text-xs text-gray-400 mt-3">Voice input (आवाज़): abhi configure nahi hai — backend se 503 aane par yahin bataya jayega.</p>
+      <p className="text-xs text-gray-600 mt-3">Voice input (आवाज़): abhi configure nahi hai — backend se 503 aane par yahin bataya jayega.</p>
     </div>
   );
 };
