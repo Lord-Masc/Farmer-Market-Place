@@ -167,3 +167,55 @@ describe('POST /api/uploads/image?kind=verification (Stage 1)', () => {
     expect(mockStorage.upload).not.toHaveBeenCalled();
   });
 });
+
+describe('POST /api/uploads/image?kind=proof (Stage 6)', () => {
+  // Delivery proof photos go to the PRIVATE delivery-proofs bucket (same
+  // pattern as kind=verification): the response carries the path only,
+  // and verify-otp requires that path prefix.
+  function imageHandler() {
+    const layer = uploadRouter.stack.find((l) => l.route && l.route.path === '/image');
+    return layer.route.stack[1].handle;
+  }
+
+  function mockRes() {
+    return { status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() };
+  }
+
+  beforeEach(() => {
+    mockStorage.upload.mockClear();
+    mockStorage.getPublicUrl.mockClear();
+    mockStorage.buckets.length = 0;
+  });
+
+  test('kind=proof uploads to the PRIVATE delivery-proofs bucket and returns the path only', async () => {
+    const req = {
+      query: { kind: 'proof' },
+      user: { id: 'transporter2' },
+      body: buf(0xff, 0xd8, 0xff, 0xe0),
+      headers: { 'content-type': 'image/jpeg' },
+    };
+    const res = mockRes();
+    const next = jest.fn();
+    await imageHandler()(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(mockStorage.buckets).toEqual(['delivery-proofs']);
+    const path = mockStorage.upload.mock.calls[0][0];
+    expect(path).toMatch(/^delivery-proofs\/transporter2-[0-9a-f-]+\.jpg$/);
+    expect(res.json.mock.calls[0][0]).toEqual({ path });
+    expect(mockStorage.getPublicUrl).not.toHaveBeenCalled();
+  });
+
+  test('a proof photo that is not a real image is still rejected', async () => {
+    const req = {
+      query: { kind: 'proof' },
+      user: { id: 'transporter2' },
+      body: Buffer.from('<html><script>alert(1)</script></html>'),
+      headers: { 'content-type': 'image/png' },
+    };
+    const next = jest.fn();
+    await imageHandler()(req, mockRes(), next);
+    expect(next.mock.calls[0][0]).toMatchObject({ status: 422 });
+    expect(mockStorage.upload).not.toHaveBeenCalled();
+  });
+});

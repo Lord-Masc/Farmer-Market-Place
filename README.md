@@ -14,7 +14,7 @@
 [![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=black)](https://supabase.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Razorpay](https://img.shields.io/badge/Razorpay-02042B?logo=razorpay&logoColor=white)](https://razorpay.com)
-[![Jest](https://img.shields.io/badge/Tests-42%20passing-C21325?logo=jest&logoColor=white)](backend/tests)
+[![Jest](https://img.shields.io/badge/Tests-457%20passing-C21325?logo=jest&logoColor=white)](backend/tests)
 
 </div>
 
@@ -37,7 +37,40 @@ The problem it solves: a farmer lists produce, a buyer orders it — but who mak
 
 > The backend runs on Render Free — it sleeps after inactivity, so the first request after a while can take ~50 seconds to wake up. The old `farmer-market-place-mu.vercel.app` deployment is retired (it pointed at a deleted Supabase project) — please use the link above.
 
-2-sided agri marketplace connecting farmers and buyers with Razorpay payment tracking.
+## Agritech transformation — stages 0–11
+
+The marketplace is being rebuilt module by module per
+[docs/transformation-assessment-2026-11-12.md](docs/transformation-assessment-2026-11-12.md).
+Stage 0 is the only stage live. Every later stage is complete on a local
+branch — NOT pushed, NOT live — until it goes through the launch checklist.
+
+| Stage | Module | Status | Branch | Migration (file-only until applied live) |
+|---|---|---|---|---|
+| 0 | Foundations & safety | ✅ LIVE on main since 2026-11-12 18:13 IST | `feat/stage0-foundations` | 7 × `20261115_*.sql` — all applied live |
+| 1 | Trust foundation | Complete, not live | `feat/stage1-trust` | `20261116_trust_foundation.sql` |
+| 2 | Digital Crop Passport | Complete, not live | `feat/stage2-passport` | `20261117_crop_passport.sql` + `20261117_verification_docs_private.sql` — needs private `verification-docs` bucket |
+| 3 | FairPrice Intelligence | ⛔ BLOCKED — needs Rishabh's data.gov.in API key | — | — |
+| 4 | Negotiation | Complete, not live | `feat/stage4-negotiation` | `20261119_negotiation.sql` |
+| 5 | Smart Group Selling | Complete, not live | `feat/stage5-group-selling` | `20261120_group_selling.sql` |
+| 6 | Logistics & Delivery | Complete, not live | `feat/stage6-logistics` | `20261121_logistics.sql` — needs private `delivery-proofs` bucket |
+| 7 | Dispute & Trust Management | Complete, not live | `feat/stage7-disputes` | `20261122_disputes.sql` — needs private `dispute-evidence` bucket |
+| 8 | AI Farmer Assistant | Complete, not live | `feat/stage8-assistant` | `20261123_assistant.sql` |
+| 9 | Notifications & Communication | Complete, not live | `feat/stage9-notifications` | `20261124_notifications.sql` |
+| 10 | Admin & Platform Intelligence | Complete, not live | `feat/stage10-admin` | `20261125_admin_views.sql` |
+| 11 | Design, mobile, hardening & launch readiness | In progress (docs unit) | `feat/stage11-launch` | None — theme applies only after Rishabh picks one |
+
+**Go-live order:** 1 → 2 → 4 → 5 → 6 → 7 → 8 → 9 → 10, then Stage 11
+theme application after Rishabh's pick. Stage 3 slots in after Stage 1
+whenever the data.gov.in key arrives — nothing in Stages 4–11 depends on
+it being live. Per stage: apply its migration live → create its private
+bucket where listed → push branch files to main via the browser web-UI →
+live-verify. Full steps: [docs/ai/LAUNCH_CHECKLIST.md](docs/ai/LAUNCH_CHECKLIST.md).
+Security re-audit scope (not yet run — needs Rishabh's go-ahead):
+[docs/ai/PENTEST_SCOPE.md](docs/ai/PENTEST_SCOPE.md).
+
+Backend tests at the Stage 10 merge: 457/457 pass, 25 suites
+(`cd backend && npm test -- --runInBand`). Passing unit tests do not
+establish live Razorpay or Supabase integration.
 
 ## Project structure
 
@@ -57,7 +90,7 @@ The problem it solves: a farmer lists produce, a buyer orders it — but who mak
 │   ├── controllers/      # escrowController.js — request in, response out
 │   ├── services/         # escrowService.js — the real work: Razorpay, stock, refunds
 │   ├── middleware/       # requireAuth (Supabase JWT) + security (CORS, headers, rate limit)
-│   ├── tests/            # Jest tests — 42 tests across 5 suites (refund idempotency, escrow security, order completion)
+│   ├── tests/            # Jest tests — 457 tests across 25 suites at the Stage 10 merge (escrow, refunds, verification, passports, negotiation, group selling, logistics, disputes, assistant, notifications, admin)
 │   └── utils/            # Shared errors
 ├── supabase/migrations/ # THE database source of truth — apply in order on a fresh project:
 │   ├── 20261108_base_schema.sql        # tables: profiles, products, orders, payments…

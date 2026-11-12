@@ -2,7 +2,9 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch, ordersFetch, uploadImage } from '../services/escrowApi';
+import { escrowFetch, listDisputes, ordersFetch, uploadImage } from '../services/escrowApi';
+import OfflineOrderStatus from '../components/OfflineOrderStatus';
+import { saveOfflineOrders } from '../services/offlineOrders';
 import { validateImageFile } from '../utils/fileValidation';
 
 const BuyerDashboard = () => {
@@ -24,6 +26,18 @@ const BuyerDashboard = () => {
   // Data State
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  // Disputes keyed by order id (Stage 7): best-effort — a failed read
+  // leaves the map empty and the file link still goes to /disputes.
+  const [orderDisputes, setOrderDisputes] = useState({});
+
+  useEffect(() => {
+    if (!user) return;
+    listDisputes().then((res) => {
+      const map = {};
+      (res.disputes || []).forEach((d) => { if (d.order_id) map[d.order_id] = d.id; });
+      setOrderDisputes(map);
+    }).catch(() => {});
+  }, [user]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [orderFilter, setOrderFilter] = useState('All'); // For My Orders tab
@@ -356,6 +370,10 @@ const BuyerDashboard = () => {
         }));
 
         setOrders(mergedOrders || []);
+        // Offline status: snapshot the fetched orders so the buyer can
+        // still see real statuses with no connection. Write-only here —
+        // the fetch itself is unchanged.
+        saveOfflineOrders(mergedOrders || []);
     } catch (err) {
         console.error("Farmer Orders catch:", err);
         const { data: fallback } = await supabase.from('orders').select('*').eq('buyer_id', user.id);
@@ -480,13 +498,17 @@ const BuyerDashboard = () => {
                 {/* Total Spent Card */}
                 <div 
                     onClick={() => navigate('/spent-analysis')}
+                    role="button"
+                    tabIndex={0}
+                    aria-label="View spending analysis"
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/spent-analysis'); } }}
                     className="bg-white p-6 rounded-2xl shadow-sm border border-transparent hover:border-amber transition-all group cursor-pointer hover:scale-[1.02] active:scale-95"
                 >
                     <div className="flex justify-between items-start mb-4">
                         <span className="text-2xl">🛒</span>
                         <span className="text-[10px] font-black text-amber opacity-0 group-hover:opacity-100 transition-opacity uppercase">See Details →</span>
                     </div>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Total Spent</p>
+                    <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Total Spent</p>
                     <h3 className="text-2xl font-black text-green-deep mb-2">₹{totalSpent}</h3>
                     <span className="text-xs text-amber font-bold">{orders.length} orders total</span>
                 </div>
@@ -495,7 +517,7 @@ const BuyerDashboard = () => {
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-transparent hover:border-green-fresh transition-all group overflow-hidden">
                     <div className="flex justify-between items-start mb-4">
                         <span className="text-2xl">📦</span>
-                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Your Orders</p>
+                        <p className="text-xs text-gray-600 font-bold uppercase tracking-widest">Your Orders</p>
                     </div>
                     
                     <div className="flex flex-col gap-2">
@@ -527,6 +549,7 @@ const BuyerDashboard = () => {
         return (
           <div className="space-y-10">
             {renderStats()}
+            <OfflineOrderStatus />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
                 {/* Recent Activity - Orders */}
                 <section className="bg-white rounded-[32px] p-8 shadow-sm border border-cream-dark">
@@ -541,7 +564,7 @@ const BuyerDashboard = () => {
                                     <div className="w-10 h-10 rounded-xl bg-amber/10 flex items-center justify-center text-xl">📦</div>
                                     <div>
                                         <p className="text-sm font-bold text-green-deep">Ordered {order.product?.name}</p>
-                                        <p className="text-[10px] text-gray-400 uppercase font-black">{new Date(order.created_at).toLocaleDateString()}</p>
+                                        <p className="text-[10px] text-gray-600 uppercase font-black">{new Date(order.created_at).toLocaleDateString()}</p>
                                     </div>
                                 </div>
                                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${order.status === 'PENDING' ? 'bg-amber/20 text-amber' : 'bg-green-fresh/20 text-green-fresh'}`}>
@@ -549,7 +572,7 @@ const BuyerDashboard = () => {
                                 </span>
                             </div>
                         ))}
-                        {orders.length === 0 && <p className="text-center py-20 text-gray-400 italic">No recent activity yet.</p>}
+                        {orders.length === 0 && <p className="text-center py-20 text-gray-600 italic">No recent activity yet.</p>}
                     </div>
                 </section>
 
@@ -581,7 +604,7 @@ const BuyerDashboard = () => {
                                 </div>
                             </div>
                         ))}
-                        {products.length === 0 && <p className="text-center py-20 text-gray-400 italic">Fetching fresh harvests...</p>}
+                        {products.length === 0 && <p className="text-center py-20 text-gray-600 italic">Fetching fresh harvests...</p>}
                     </div>
                 </section>
             </div>
@@ -640,7 +663,7 @@ const BuyerDashboard = () => {
                                 </div>
 
                                 <div className="space-y-1 mb-4 flex flex-col items-start bg-cream/30 p-3 rounded-2xl border border-cream-dark/50">
-                                    <p className="text-[9px] font-black uppercase text-gray-400 tracking-tighter">Current Market Price</p>
+                                    <p className="text-[9px] font-black uppercase text-gray-600 tracking-tighter">Current Market Price</p>
                                     <div className="flex items-center gap-2">
                                         <h4 className="text-xl font-black text-green-deep">₹{p.user_price}</h4>
                                         <span className="text-[9px] text-amber font-black uppercase bg-white px-2 py-0.5 rounded border border-amber/20">per {p.unit}</span>
@@ -657,7 +680,7 @@ const BuyerDashboard = () => {
                                     <button 
                                         disabled={p.quantity <= 0}
                                         onClick={() => handleBuyProduct(p)}
-                                        className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase transition-all shadow-md group ${p.quantity <= 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-deep text-white hover:bg-green-fresh hover:scale-105 active:scale-95'}`}
+                                        className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase transition-all shadow-md group ${p.quantity <= 0 ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : 'bg-green-deep text-white hover:bg-green-fresh hover:scale-105 active:scale-95'}`}
                                     >
                                         {p.quantity <= 0 ? 'Restocking' : 'Order Now →'}
                                     </button>
@@ -684,7 +707,7 @@ const BuyerDashboard = () => {
                             <button 
                                 key={f} 
                                 onClick={() => setOrderFilter(f)}
-                                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${orderFilter === f ? 'bg-green-deep text-white shadow-lg' : 'bg-cream text-gray-400 hover:bg-amber/10 hover:text-amber'}`}
+                                className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${orderFilter === f ? 'bg-green-deep text-white shadow-lg' : 'bg-cream text-gray-600 hover:bg-amber/10 hover:text-amber'}`}
                             >
                                 {f}
                             </button>
@@ -695,7 +718,7 @@ const BuyerDashboard = () => {
                 <div className="bg-white rounded-3xl shadow-sm border border-cream-dark overflow-hidden">
                     <div className="max-h-[650px] overflow-y-auto custom-scrollbar overflow-x-auto">
                         <table className="w-full text-left">
-                            <thead className="bg-cream/50 text-[10px] font-black uppercase tracking-widest text-gray-400 sticky top-0 z-10">
+                            <thead className="bg-cream/50 text-[10px] font-black uppercase tracking-widest text-gray-600 sticky top-0 z-10">
                                 <tr>
                                     <th className="p-6">Product</th>
                                     <th className="p-6">Farmer</th>
@@ -714,7 +737,7 @@ const BuyerDashboard = () => {
                                                 </div>
                                                 <div className="min-w-[120px]">
                                                     <p className="text-sm font-black text-green-deep">{order.product?.name}</p>
-                                                    <p className="text-[10px] text-gray-400 font-bold uppercase">{new Date(order.created_at).toLocaleDateString()} at {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                                    <p className="text-[10px] text-gray-600 font-bold uppercase">{new Date(order.created_at).toLocaleDateString()} at {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                                                 </div>
                                             </div>
                                         </td>
@@ -733,7 +756,7 @@ const BuyerDashboard = () => {
                                                 <p className="text-sm font-black text-green-deep">₹{order.total_price}</p>
                                                 <div className="flex flex-col gap-0.5 mt-1">
                                                     <p className="text-[9px] text-green-mid font-black uppercase">Qty: {order.quantity} {order.unit_at_order || order.product?.unit}</p>
-                                                    <p className="text-[8px] text-gray-400 font-bold uppercase truncate max-w-[120px]">🏠 {order.delivery_address}</p>
+                                                    <p className="text-[8px] text-gray-600 font-bold uppercase truncate max-w-[120px]">🏠 {order.delivery_address}</p>
                                                 </div>
                                             </div>
                                         </td>
@@ -785,13 +808,22 @@ const BuyerDashboard = () => {
                                                     <span>✨</span> Order Completed
                                                 </span>
                                             )}
+                                            {orderDisputes[order.id] ? (
+                                                <Link to={`/disputes/${orderDisputes[order.id]}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline text-right">
+                                                    View dispute →
+                                                </Link>
+                                            ) : ['PAID', 'SHIPPED', 'DELIVERED', 'COMPLETED'].includes(order.status) && (
+                                                <Link to={`/disputes?order=${encodeURIComponent(order.id)}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline text-right">
+                                                    File a dispute
+                                                </Link>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
-                    {filteredOrders.length === 0 && <div className="p-20 text-center text-gray-400 italic font-bold">No orders found in this category. 🌿</div>}
+                    {filteredOrders.length === 0 && <div className="p-20 text-center text-gray-600 italic font-bold">No orders found in this category. 🌿</div>}
                 </div>
             </div>
         );
@@ -800,12 +832,12 @@ const BuyerDashboard = () => {
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-cream-dark">
               <h2 className="font-playfair text-2xl font-black text-green-deep mb-2">Payment & Order Tracker</h2>
-              <p className="text-gray-400 text-sm font-bold">Track payment verification and delivery status.</p>
+              <p className="text-gray-600 text-sm font-bold">Track payment verification and delivery status.</p>
             </div>
             
             <div className="grid grid-cols-1 gap-6">
               {orders.filter(o => o.status !== 'CANCELLED' && o.status !== 'PENDING').length === 0 ? (
-                <div className="py-20 text-center bg-white rounded-3xl border border-cream-dark text-gray-400 font-bold italic">
+                <div className="py-20 text-center bg-white rounded-3xl border border-cream-dark text-gray-600 font-bold italic">
                   No active secured payments to track. 🌿
                 </div>
               ) : (
@@ -818,7 +850,7 @@ const BuyerDashboard = () => {
                         </div>
                         <div>
                           <h4 className="text-lg font-black text-green-deep">{order.product?.name}</h4>
-                          <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Order Amount: ₹{order.total_price}</p>
+                          <p className="text-xs text-gray-600 font-bold uppercase tracking-widest">Order Amount: ₹{order.total_price}</p>
                         </div>
                       </div>
 
@@ -848,14 +880,14 @@ const BuyerDashboard = () => {
                           </div>
                           
                           <div className="relative z-10 flex flex-col items-center">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-lg ring-4 ring-green-fresh/10' : 'bg-cream-dark text-gray-400'}`}>👨‍🌾</div>
-                            <p className={`text-[10px] font-black uppercase mt-2 ${(order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'text-green-fresh' : 'text-gray-400'}`}>Farmer Paid</p>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-lg ring-4 ring-green-fresh/10' : 'bg-cream-dark text-gray-600'}`}>👨‍🌾</div>
+                            <p className={`text-[10px] font-black uppercase mt-2 ${(order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'text-green-fresh' : 'text-gray-600'}`}>Farmer Paid</p>
                           </div>
                         </div>
                       </div>
 
                       <div className="bg-cream/20 p-5 rounded-2xl border border-cream-dark/50 text-center lg:text-right min-w-[200px]">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-tighter mb-1">Current Fund Location</p>
+                        <p className="text-[10px] font-black text-gray-600 uppercase tracking-tighter mb-1">Current Fund Location</p>
                         <p className={`text-sm font-black uppercase ${(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? 'text-amber' : 'text-green-fresh'}`}>
                           {(order.status !== 'DELIVERED' && order.status !== 'COMPLETED') ? 'Payment recorded' : 'Order completed'}
                         </p>
@@ -908,11 +940,11 @@ const BuyerDashboard = () => {
                     
                     <div className="w-full mt-10 space-y-4 border-t border-cream-dark pt-8 text-left">
                         <div>
-                            <p className="text-[10px] font-black uppercase text-gray-400">Email Address</p>
+                            <p className="text-[10px] font-black uppercase text-gray-600">Email Address</p>
                             <p className="text-sm font-bold text-green-deep truncate">{profile?.email_address}</p>
                         </div>
                         <div>
-                            <p className="text-[10px] font-black uppercase text-gray-400">Phone</p>
+                            <p className="text-[10px] font-black uppercase text-gray-600">Phone</p>
                             <p className="text-sm font-bold text-green-deep">+91 {profile?.phone_number}</p>
                         </div>
                     </div>
@@ -945,17 +977,17 @@ const BuyerDashboard = () => {
                     }}>
                         <div className="grid grid-cols-2 gap-6">
                             <div className="space-y-1.5 text-left">
-                                <label className="text-xs font-bold uppercase text-gray-400 ml-1">First Name</label>
-                                <input name="first_name" defaultValue={profile?.first_name} className="w-full bg-cream/50 border border-transparent focus:border-amber focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
+                                <label className="text-xs font-bold uppercase text-gray-600 ml-1" htmlFor="first-name">First Name</label>
+                                <input id="first-name" name="first_name" defaultValue={profile?.first_name} className="w-full bg-cream/50 border border-transparent focus:border-amber focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
                             </div>
                             <div className="space-y-1.5 text-left">
-                                <label className="text-xs font-bold uppercase text-gray-400 ml-1">Last Name</label>
-                                <input name="last_name" defaultValue={profile?.last_name} className="w-full bg-cream/50 border border-transparent focus:border-amber focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
+                                <label className="text-xs font-bold uppercase text-gray-600 ml-1" htmlFor="last-name">Last Name</label>
+                                <input id="last-name" name="last_name" defaultValue={profile?.last_name} className="w-full bg-cream/50 border border-transparent focus:border-amber focus:bg-white px-5 py-3 rounded-2xl outline-none transition-all font-bold" />
                             </div>
                         </div>
                         <div className="space-y-1.5 text-left">
-                            <label className="text-[10px] font-black uppercase text-gray-400 ml-1 tracking-widest">Delivery Address</label>
-                            <textarea name="address" defaultValue={profile?.address} placeholder="House No, Landmark, Road, City, State..." className="w-full bg-cream/50 border border-transparent focus:border-amber focus:bg-white px-5 py-4 rounded-2xl outline-none transition-all font-bold min-h-[120px] resize-none" />
+                            <label className="text-[10px] font-black uppercase text-gray-600 ml-1 tracking-widest" htmlFor="delivery-address">Delivery Address</label>
+                            <textarea id="delivery-address" name="address" defaultValue={profile?.address} placeholder="House No, Landmark, Road, City, State..." className="w-full bg-cream/50 border border-transparent focus:border-amber focus:bg-white px-5 py-4 rounded-2xl outline-none transition-all font-bold min-h-[120px] resize-none" />
                         </div>
                         <button className="bg-green-deep text-white px-10 py-4 rounded-2xl font-black text-sm shadow-xl hover:scale-105 active:scale-95 transition-all">
                             Save Profile Securely
@@ -965,7 +997,7 @@ const BuyerDashboard = () => {
             </div>
         );
       default:
-        return <div className="text-center py-20 text-gray-400 italic">Coming Soon...</div>;
+        return <div className="text-center py-20 text-gray-600 italic">Coming Soon...</div>;
     }
   };
 
@@ -1057,7 +1089,7 @@ const BuyerDashboard = () => {
                               <div className={`h-1 w-8 rounded-full ${orderStep === 2 ? 'bg-green-deep' : 'bg-green-deep/20'}`}></div>
                           </div>
                       </div>
-                      <button onClick={() => setShowOrderModal(false)} className="text-green-deep/40 hover:text-green-deep text-2xl transition-colors">×</button>
+                      <button onClick={() => setShowOrderModal(false)} aria-label="Close order details" className="text-green-deep/40 hover:text-green-deep text-2xl transition-colors">×</button>
                   </div>
 
                   <div className="p-8 overflow-y-auto custom-scrollbar flex-1">
@@ -1080,7 +1112,7 @@ const BuyerDashboard = () => {
                                       </div>
                                       <div className="flex-1">
                                           <div className="flex justify-between items-center">
-                                              <p className="text-[9px] font-black uppercase text-gray-400">
+                                              <p className="text-[9px] font-black uppercase text-gray-600">
                                                   Sold By {selectedProduct.farmer?.first_name || 'Agro'} {selectedProduct.farmer?.last_name || 'Farmer'}
                                               </p>
                                               <span className="text-[8px] font-black text-amber bg-white px-2 py-0.5 rounded-full border border-amber/10 shadow-sm uppercase">
@@ -1094,8 +1126,8 @@ const BuyerDashboard = () => {
 
                               <div className="flex justify-between items-center bg-cream/50 p-4 rounded-3xl border border-cream-dark">
                                   <div className="flex flex-col gap-1">
-                                      <label className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Unit</label>
-                                      <select 
+                                      <label className="text-[9px] font-black uppercase text-gray-600 tracking-widest" htmlFor="unit">Unit</label>
+                                      <select id="unit"
                                           value={orderUnit} 
                                           onChange={(e) => setOrderUnit(e.target.value)}
                                           className="bg-transparent font-black text-green-deep outline-none uppercase text-xs cursor-pointer"
@@ -1105,7 +1137,7 @@ const BuyerDashboard = () => {
                                       </select>
                                   </div>
                                   <div className="flex flex-col items-end gap-1">
-                                      <label className="text-[9px] font-black uppercase text-gray-400 tracking-widest text-right">Quantity</label>
+                                      <label className="text-[9px] font-black uppercase text-gray-600 tracking-widest text-right">Quantity</label>
                                       <div className="flex items-center gap-4 bg-white rounded-full px-4 py-2 border border-cream-dark shadow-sm">
                                           <button 
                                               onClick={() => setOrderQuantity(Math.max(1, orderQuantity - 1))}
@@ -1128,7 +1160,7 @@ const BuyerDashboard = () => {
 
                               <div className={`bg-green-deep/5 p-6 rounded-3xl border border-dashed transition-all ${isEditingPhone ? 'border-amber ring-4 ring-amber/5' : 'border-green-deep/20'}`}>
                                   <div className="flex justify-between items-center mb-4">
-                                      <span className="text-xs font-black uppercase text-gray-400">Buyer Contact Number</span>
+                                      <span className="text-xs font-black uppercase text-gray-600">Buyer Contact Number</span>
                                       <button 
                                           onClick={() => setIsEditingPhone(!isEditingPhone)}
                                           className={`text-[10px] font-black uppercase px-2 py-1 rounded-lg transition-all ${isEditingPhone ? 'bg-amber text-white' : 'text-amber hover:bg-amber/10'}`}
@@ -1155,7 +1187,7 @@ const BuyerDashboard = () => {
 
                               <div className={`bg-green-deep/5 p-6 rounded-3xl border border-dashed transition-all ${isEditingAddress ? 'border-amber ring-4 ring-amber/5' : 'border-green-deep/20'}`}>
                                   <div className="flex justify-between items-center mb-4">
-                                      <span className="text-xs font-black uppercase text-gray-400">Delivery Address</span>
+                                      <span className="text-xs font-black uppercase text-gray-600">Delivery Address</span>
                                       <button 
                                           onClick={() => setIsEditingAddress(!isEditingAddress)}
                                           className={`text-[10px] font-black uppercase px-2 py-1 rounded-lg transition-all ${isEditingAddress ? 'bg-amber text-white' : 'text-amber hover:bg-amber/10'}`}
@@ -1181,7 +1213,7 @@ const BuyerDashboard = () => {
 
                               <div className="pt-4 border-t border-cream-dark flex justify-between items-center">
                                   <div>
-                                      <p className="text-[10px] font-black uppercase text-gray-400 tracking-tighter">Approx. Total Bill</p>
+                                      <p className="text-[10px] font-black uppercase text-gray-600 tracking-tighter">Approx. Total Bill</p>
                                       <h4 className="text-3xl font-black text-green-deep">
                                           ₹{orderUnit === 'quintal' ? (orderQuantity * 100 * selectedProduct.user_price) : (orderQuantity * selectedProduct.user_price)}
                                       </h4>
@@ -1202,11 +1234,11 @@ const BuyerDashboard = () => {
                                   <div className="bg-amber/10 p-5 rounded-3xl border border-amber/20 mt-6 text-left">
                                       <p className="text-[10px] font-black text-amber uppercase mb-2">🚚 Delivery to:</p>
                                       <p className="text-xs font-bold text-green-deep">{deliveryAddress}</p>
-                                      <p className="text-[10px] font-black text-gray-400 mt-3 uppercase">Phone: {phoneNumber}</p>
+                                      <p className="text-[10px] font-black text-gray-600 mt-3 uppercase">Phone: {phoneNumber}</p>
                                   </div>
 
                                   <div className="bg-cream/30 p-5 rounded-3xl border border-dashed border-gray-200 mt-4">
-                                      <p className="text-[10px] font-bold text-gray-400 italic leading-relaxed">
+                                      <p className="text-[10px] font-bold text-gray-600 italic leading-relaxed">
                                           "By sending this request, the farmer will be notified to set aside your stock. Once approved, you can complete the secure payment."
                                       </p>
                                   </div>
@@ -1236,7 +1268,7 @@ const BuyerDashboard = () => {
                           <div className="py-12 text-center animate-in zoom-in-95 duration-500">
                               <div className="w-24 h-24 bg-green-fresh text-white rounded-full flex items-center justify-center mx-auto mb-8 text-5xl shadow-[0_0_40px_rgba(16,185,129,0.3)]">✨</div>
                               <h3 className="text-2xl font-black text-green-deep uppercase tracking-tight">Request Sent!</h3>
-                              <p className="text-gray-400 font-bold mt-2">Farmer will review and approve your order shortly.<br/>Check 'My Orders' for the payment link once approved. 📑</p>
+                              <p className="text-gray-600 font-bold mt-2">Farmer will review and approve your order shortly.<br/>Check 'My Orders' for the payment link once approved. 📑</p>
                               
                               <div className="mt-10 flex justify-center gap-2">
                                   {[1,2,3].map(i => <div key={i} className="w-2 h-2 bg-green-fresh rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />)}
@@ -1364,7 +1396,7 @@ const BuyerDashboard = () => {
                   <div className="flex gap-3">
                       <button 
                           onClick={() => setConfirmModal({ show: false, orderId: null })}
-                          className="flex-1 py-4 rounded-2xl font-black text-[10px] uppercase border-2 border-cream-dark text-gray-400 hover:bg-cream transition-all"
+                          className="flex-1 py-4 rounded-2xl font-black text-[10px] uppercase border-2 border-cream-dark text-gray-600 hover:bg-cream transition-all"
                       >
                           Wait
                       </button>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import NotificationBell from './NotificationBell';
 
 const Navbar = () => {
   const { user, profile, signOut } = useAuth();
@@ -38,9 +39,18 @@ const Navbar = () => {
       </div>
 
       <div className="flex items-center gap-3">
+        <Link
+          to="/transparency"
+          className="font-dmsans text-[0.9rem] font-medium text-[#4a4a4a] hover:text-green-mid transition-colors duration-200"
+        >
+          Transparency
+        </Link>
         {user ? (
           /* ── LOGGED IN STATE ── */
           <div className="flex items-center gap-3">
+            {/* Notification bell (Stage 9): count from the API only. */}
+            <NotificationBell />
+
             {/* Dashboard Button */}
             <Link
               to={dashboardPath}
@@ -85,6 +95,56 @@ const Navbar = () => {
                       className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
                     >
                       📝 Requirements
+                    </Link>
+                  )}
+                  {profile?.role === 'farmer' && (
+                    <Link
+                      to="/group-buys"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                    >
+                      🤝 Group buys
+                    </Link>
+                  )}
+                  {profile?.role === 'transporter' && (
+                    <Link
+                      to="/transporters"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                    >
+                      🚚 Transporters
+                    </Link>
+                  )}
+                  {(profile?.role === 'buyer' || profile?.role === 'farmer' || profile?.role === 'admin') && (
+                    <Link
+                      to="/disputes"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                    >
+                      ⚖️ Disputes
+                    </Link>
+                  )}
+                  <Link
+                    to="/assistant"
+                    onClick={() => setDropdownOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                  >
+                    💬 सहायक (Assistant)
+                  </Link>
+                  <Link
+                    to="/notifications"
+                    onClick={() => setDropdownOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                  >
+                    🔔 Notifications
+                  </Link>
+                  {profile?.role === 'admin' && (
+                    <Link
+                      to="/admin"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                    >
+                      🛡️ Admin dashboard
                     </Link>
                   )}
                   {profile?.role === 'admin' && (

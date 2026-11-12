@@ -154,13 +154,14 @@ const Login = () => {
 
           <div className="space-y-1.5 text-left">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-green-deep block">Password</label>
+              <label className="text-sm font-medium text-green-deep block" htmlFor="login-password">Password</label>
               <button type="button" onClick={handleForgotPassword} className="text-xs font-semibold text-amber hover:text-amber-light transition-colors">Forgot?</button>
             </div>
             <div className="relative">
               <input 
                 type={showPassword ? "text" : "password"} 
                 required
+                id="login-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••" 
@@ -169,6 +170,7 @@ const Login = () => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 className="absolute right-4 top-1/2 -translate-y-1/2 text-lg opacity-50 hover:opacity-100 transition-opacity"
               >
                 {showPassword ? '👁️' : '🔒'}
@@ -180,6 +182,7 @@ const Login = () => {
             <input 
               type="checkbox" 
               required 
+              aria-label="I agree to the Terms of Service"
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
               className="mt-1 accent-green-deep" 

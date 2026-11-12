@@ -146,6 +146,7 @@ const VerificationQueue = () => {
                     <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6">
                         <h2 className="text-xl font-bold text-green-deep flex-1">Verification submissions</h2>
                         <select
+                            aria-label="Filter verifications by status"
                             value={status}
                             onChange={(e) => { setStatus(e.target.value); setPage(1); }}
                             className="bg-cream/50 border border-transparent focus:border-green-fresh px-4 py-2 rounded-2xl outline-none font-bold text-green-deep text-sm"
@@ -210,6 +211,7 @@ const VerificationQueue = () => {
                                             <input
                                                 value={rejectNote}
                                                 onChange={(e) => setRejectNote(e.target.value)}
+                                                aria-label="Rejection note"
                                                 placeholder="Rejection note (required)"
                                                 className="flex-1 bg-white border-2 border-transparent focus:border-amber px-5 py-3 rounded-2xl outline-none font-bold text-green-deep text-sm"
                                             />
@@ -267,7 +269,7 @@ const VerificationQueue = () => {
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-sm">
                                 <thead>
-                                    <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                                    <tr className="text-[10px] font-black uppercase text-gray-600 tracking-widest">
                                         <th className="py-3 pr-4">Name</th>
                                         <th className="py-3 pr-4">Email</th>
                                         <th className="py-3 pr-4">Role</th>
@@ -282,6 +284,7 @@ const VerificationQueue = () => {
                                             <td className="py-3 pr-4">
                                                 <select
                                                     value={row.role}
+                                                    aria-label={`Change role for ${`${row.first_name || ''} ${row.last_name || ''}`.trim() || row.email_address}`}
                                                     disabled={roleBusy === row.id}
                                                     onChange={(e) => handleRoleChange(row, e.target.value)}
                                                     className="bg-cream/50 border border-transparent focus:border-green-fresh px-3 py-2 rounded-xl outline-none font-bold text-green-deep text-sm disabled:opacity-50"
