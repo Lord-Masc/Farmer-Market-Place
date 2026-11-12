@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { uploadImage } from '../services/escrowApi';
 import { validateImageFile } from '../utils/fileValidation';
 
 const UserProfile = () => {
@@ -67,11 +68,8 @@ const UserProfile = () => {
                                          const validationError = validateImageFile(file);
                                          if (validationError) { alert(validationError); return; }
                                          try {
-                                             const fileName = `profile-${user.id}-${Date.now()}`;
-                                             const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
-                                             if (uploadError) throw uploadError;
-                                             const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                                             await supabase.from('profiles').update({ photo_url: data.publicUrl }).eq('id', user.id);
+                                             const publicUrl = await uploadImage(file, 'profile');
+                                             await supabase.from('profiles').update({ photo_url: publicUrl }).eq('id', user.id);
                                              window.location.reload();
                                          } catch (err) { alert(err.message); }
                                      }
@@ -79,7 +77,6 @@ const UserProfile = () => {
                             </label>
                         </div>
                         <h2 className="text-3xl font-playfair font-black text-green-deep">{profile?.first_name} {profile?.last_name}</h2>
-                        <span className="mt-2 inline-block px-4 py-1 bg-amber/20 text-amber text-[10px] font-black uppercase tracking-widest rounded-full ring-2 ring-amber/5">Verified {profile?.role}</span>
                         
                         <div className="w-full mt-10 space-y-4 border-t border-cream-dark pt-10 text-left">
                             <div className="flex items-center gap-4 group p-4 bg-cream/30 rounded-[28px] border border-cream-dark/50 hover:border-amber transition-all">

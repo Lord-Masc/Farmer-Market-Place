@@ -12,6 +12,24 @@ const Login = () => {
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  const handleForgotPassword = async () => {
+    setError(null);
+    if (!validateEmail(identifier)) {
+      setError('Enter your email address above, then tap Forgot?.');
+      return;
+    }
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(identifier, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (resetError) {
+      setError('Could not send a reset link. Please try again.');
+      return;
+    }
+    // Generic: never confirm whether the email has an account.
+    setResetSent(true);
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -56,7 +74,11 @@ const Login = () => {
         .single();
       
       if (profileTestError || !profileTest) {
-        setError(`You do not have a ${role} profile associated with this account.`);
+        // Sign out: the session belongs to the other role, and leaving it
+        // live would let the wrong-role dashboard render. Generic message —
+        // a wrong role must be indistinguishable from a wrong password.
+        await supabase.auth.signOut();
+        setError('Invalid email or password.');
         setLoading(false);
         return;
       }
@@ -110,6 +132,12 @@ const Login = () => {
           </div>
         )}
 
+        {resetSent && (
+          <div className="mb-6 p-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl font-medium text-center">
+            If an account exists for that email, a password-reset link is on its way.
+          </div>
+        )}
+
         <form className="space-y-5" onSubmit={handleLogin}>
           <div className="space-y-1.5 text-left">
             <label htmlFor="identifier" className="text-sm font-medium text-green-deep block">Email Address</label>
@@ -127,7 +155,7 @@ const Login = () => {
           <div className="space-y-1.5 text-left">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-green-deep block">Password</label>
-              <a href="#" className="text-xs font-semibold text-amber hover:text-amber-light transition-colors">Forgot?</a>
+              <button type="button" onClick={handleForgotPassword} className="text-xs font-semibold text-amber hover:text-amber-light transition-colors">Forgot?</button>
             </div>
             <div className="relative">
               <input 

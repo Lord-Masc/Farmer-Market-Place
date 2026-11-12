@@ -30,7 +30,10 @@ const SpentAnalysis = () => {
       const { data, error } = await supabase
         .from('orders')
         .select('total_price, created_at')
-        .eq('buyer_id', user.id);
+        .eq('buyer_id', user.id)
+        // Only orders actually paid for count as spent — unpaid, cancelled
+        // and refunded orders never were.
+        .in('status', ['PAID', 'SHIPPED', 'DELIVERED', 'COMPLETED']);
 
       if (error) throw error;
 

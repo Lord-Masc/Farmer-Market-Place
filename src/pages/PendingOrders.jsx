@@ -27,7 +27,7 @@ const PendingOrders = () => {
                     product:products(*)
                 `)
                 .eq('buyer_id', user.id)
-                .eq('status', 'pending')
+                .eq('status', 'PENDING')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;

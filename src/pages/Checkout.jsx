@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
+import { ordersFetch } from '../services/escrowApi';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import EscrowCheckout from '../components/EscrowCheckout';
@@ -17,10 +18,12 @@ const Checkout = () => {
     const [quantity, setQuantity] = useState(1);
     const [address, setAddress] = useState('');
     const [phone, setPhone] = useState('');
-    const [buyerName, setBuyerName] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    // One idempotency key per checkout attempt, reused across retries so a
+    // retried submit never creates a duplicate order.
+    const orderKeyRef = useRef(null);
 
     useEffect(() => {
         if (!user) return;
@@ -29,7 +32,6 @@ const Checkout = () => {
                 const { data: profile } = await supabase.from('profiles')
                     .select('address,phone_number,phone,first_name,last_name').eq('id', user.id).single();
                 setAddress(profile?.address || '');
-                setBuyerName([profile?.first_name, profile?.last_name].filter(Boolean).join(' '));
                 setPhone(profile?.phone_number || profile?.phone || '');
 
                 let selectedProductId = productId;
@@ -38,8 +40,8 @@ const Checkout = () => {
                         .select('*').eq('id', orderId).eq('buyer_id', user.id).single();
                     if (orderError) throw orderError.code === 'PGRST116' ? new Error('Order not found.') : orderError;
                     if (data.status === 'PAID') throw new Error('This order is already paid.');
-                    if (data.status === 'declined') throw new Error('The farmer declined this request.');
-                    if (data.status !== 'confirmed') throw new Error('Payment is available only after farmer approval.');
+                    if (data.status === 'DECLINED') throw new Error('The farmer declined this request.');
+                    if (data.status !== 'CONFIRMED') throw new Error('Payment is available only after farmer approval.');
                     setOrder(data);
                     setQuantity(data.quantity);
                     setAddress(data.delivery_address || profile?.address || '');
@@ -79,12 +81,17 @@ const Checkout = () => {
         setSaving(true);
         setError('');
         try {
-            const { error: insertError } = await supabase.from('orders').insert({
-                buyer_id: user.id, farmer_id: product.farmer_id, product_id: product.id, buyer_name: buyerName,
-                quantity: qty, unit_at_order: unit, total_price: total, status: 'pending',
-                delivery_address: address.trim(), buyer_phone: phone.trim(),
+            // Price, farmer and total are derived server-side; the client
+            // only names the product, quantity, unit and delivery details.
+            if (!orderKeyRef.current) orderKeyRef.current = crypto.randomUUID();
+            await ordersFetch('/', {
+                method: 'POST',
+                body: {
+                    product_id: product.id, quantity: qty, unit,
+                    delivery_address: address.trim(), buyer_phone: phone.trim(),
+                },
+                headers: { 'Idempotency-Key': orderKeyRef.current },
             });
-            if (insertError) throw insertError;
             navigate('/buyer-dashboard?tab=My%20Orders');
         } catch (err) {
             setError(err.message || 'Could not place order request.');

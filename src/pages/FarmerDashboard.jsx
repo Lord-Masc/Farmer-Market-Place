@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch } from '../services/escrowApi';
+import { escrowFetch, uploadImage } from '../services/escrowApi';
 import { validateImageFile } from '../utils/fileValidation';
 
 const FarmerDashboard = () => {
@@ -217,7 +217,7 @@ const FarmerDashboard = () => {
               table: 'orders',
               filter: `farmer_id=eq.${user.id}`
           }, (payload) => {
-              if (payload.new && (payload.new.status === 'PAID' || payload.new.status === 'pending')) {
+              if (payload.new && (payload.new.status === 'PAID' || payload.new.status === 'PENDING')) {
                   setEscrowNotification({ 
                       show: true, 
                       orderId: payload.new.id, 
@@ -296,21 +296,9 @@ const FarmerDashboard = () => {
     const validationError = validateImageFile(file);
     if (validationError) throw new Error(validationError);
 
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}-${Math.random()}.${fileExt}`;
-    const filePath = `product-items/${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('product-images')
-      .upload(filePath, file);
-
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage
-      .from('product-images')
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
+    // Server-side MIME/magic-byte/size checks happen in the backend
+    // endpoint (Stage 0, H2); the returned URL is the stored image.
+    return await uploadImage(file, 'product');
   };
 
   const handlePublishProduct = async (e) => {
@@ -489,6 +477,28 @@ const FarmerDashboard = () => {
     setShowDeleteModal(true);
   };
 
+  const handleShipOrder = async (orderId) => {
+    if (!orderId) return;
+
+    setProcessingOrders(prev => ({ ...prev, [orderId]: true }));
+    try {
+        // Shipping is owned by the escrow backend, which only allows
+        // PAID -> SHIPPED for the order's own farmer.
+        await escrowFetch('/ship-order', {
+            method: 'POST',
+            body: { order_id: orderId }
+        });
+
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'SHIPPED' } : o));
+        fetchMyOrders();
+    } catch (err) {
+        console.error("Ship order failed:", err);
+        alert("⚠️ " + err.message);
+    } finally {
+        setProcessingOrders(prev => ({ ...prev, [orderId]: false }));
+    }
+  };
+
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     if (!orderId || !newStatus) return;
 
@@ -519,12 +529,11 @@ const FarmerDashboard = () => {
   };
 
   const renderStats = () => {
-    const totalEarnings = orders.filter(o => o.status === 'delivered' || o.status === 'COMPLETED').reduce((acc, curr) => acc + curr.total_price, 0);
+    const totalEarnings = orders.filter(o => o.status === 'DELIVERED' || o.status === 'COMPLETED').reduce((acc, curr) => acc + curr.total_price, 0);
     const stats = [
         { label: 'Total Earnings', value: `₹${totalEarnings || '0'}`, icon: '💰', trend: 'Lifetime income' },
         { label: 'Active Listings', value: products.length.toString(), icon: '🌾', trend: 'Live products' },
-        { label: 'Pending Orders', value: orders.filter(o => o.status === 'pending').length.toString(), icon: '📦', trend: 'New orders' },
-        { label: 'Farmer Rating', value: '4.8', icon: '⭐', trend: 'Very Reliable' },
+        { label: 'Pending Orders', value: orders.filter(o => o.status === 'PENDING').length.toString(), icon: '📦', trend: 'New orders' },
     ];
 
     return (
@@ -670,55 +679,59 @@ const FarmerDashboard = () => {
                                     <td className="p-6">
                                         <div className="flex flex-col items-start gap-1">
                                             <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${
-                                                (order.status === 'pending' || order.status === 'CREATED' || order.status === 'PAID') ? 'bg-amber/20 text-amber' : 
-                                                order.status === 'confirmed' ? 'bg-green-deep text-amber border border-amber/10 shadow-sm' : 
-                                                (order.status === 'delivered' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-md' : 
-                                                order.status === 'declined' ? 'bg-red-500/20 text-red-600' :
+                                                (order.status === 'PENDING' || order.status === 'CREATED' || order.status === 'PAID') ? 'bg-amber/20 text-amber' : 
+                                                order.status === 'CONFIRMED' ? 'bg-green-deep text-amber border border-amber/10 shadow-sm' : 
+                                                (order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'bg-green-fresh text-white shadow-md' : 
+                                                order.status === 'DECLINED' ? 'bg-red-500/20 text-red-600' :
                                                 order.status === 'SHIPPED' ? 'bg-blue-100 text-blue-600' :
                                                 'bg-green-fresh/20 text-green-fresh'
                                             }`}>
-                                                {(order.status === 'pending' || order.status === 'CREATED') ? 'New Request' : 
+                                                {(order.status === 'PENDING' || order.status === 'CREATED') ? 'New Request' : 
                                                  order.status === 'PAID' ? 'Payment Verified' :
-                                                 (order.status === 'delivered' || order.status === 'COMPLETED') ? 'Order Completed' : 
-                                                 order.status === 'declined' ? 'Request Rejected' :
+                                                 (order.status === 'DELIVERED' || order.status === 'COMPLETED') ? 'Order Completed' : 
+                                                 order.status === 'DECLINED' ? 'Request Rejected' :
                                                  order.status}
                                             </span>
                                         </div>
                                     </td>
                                     <td className="p-6">
                                         <div className="flex gap-2">
-                                            {(order.status === 'pending' || order.status === 'CREATED') && (
+                                            {(order.status === 'PENDING' || order.status === 'CREATED') && (
                                                 <>
                                                     <button 
-                                                        onClick={() => handleUpdateOrderStatus(order.id, 'confirmed')} 
+                                                        onClick={() => handleUpdateOrderStatus(order.id, 'CONFIRMED')} 
                                                         className="bg-green-deep text-[9px] uppercase font-black px-4 py-2 rounded-xl text-amber shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 border border-amber/20"
                                                     >
                                                         <span>✅</span> Approve
                                                     </button>
                                                     <button 
-                                                        onClick={() => handleUpdateOrderStatus(order.id, 'declined')} 
+                                                        onClick={() => handleUpdateOrderStatus(order.id, 'DECLINED')} 
                                                         className="bg-red-50/50 text-[9px] uppercase font-black px-4 py-2 rounded-xl text-red-600 shadow-md hover:bg-red-100 active:scale-95 transition-all flex items-center gap-1 border border-red-200"
                                                     >
                                                         <span>❌</span> Decline
                                                     </button>
                                                 </>
                                             )}
-                                            {order.status === 'confirmed' && (
+                                            {order.status === 'CONFIRMED' && (
                                                 <span className="text-[10px] font-black text-amber uppercase italic flex items-center gap-1 opacity-70">
                                                     <span>⏳</span> Waiting for Payment...
                                                 </span>
                                             )}
                                             {order.status === 'PAID' && (
-                                                <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1 opacity-90 animate-pulse">
-                                                    <span>📦</span> Payment Verified. Dispatch Now!
-                                                </span>
+                                                <button
+                                                    onClick={() => handleShipOrder(order.id)}
+                                                    disabled={processingOrders[order.id]}
+                                                    className="bg-blue-600 text-[9px] uppercase font-black px-4 py-2 rounded-xl text-white shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1 disabled:opacity-50"
+                                                >
+                                                    <span>🚚</span> {processingOrders[order.id] ? 'Shipping...' : 'Mark Shipped'}
+                                                </button>
                                             )}
-                                            {(order.status === 'delivered' || order.status === 'COMPLETED') && (
+                                            {(order.status === 'DELIVERED' || order.status === 'COMPLETED') && (
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center gap-1">
                                                     <span>💎</span> Paid & Completed
                                                 </span>
                                             )}
-                                            {order.status === 'declined' && (
+                                            {order.status === 'DECLINED' && (
                                                 <span className="text-[10px] font-black text-red-400 uppercase italic">
                                                     Order Rejected
                                                 </span>
@@ -736,11 +749,11 @@ const FarmerDashboard = () => {
             </div>
         );
       case 'Analytics': {
-          const deliveredOrders = orders.filter(o => o.status === 'delivered');
+          const deliveredOrders = orders.filter(o => o.status === 'DELIVERED');
           const totalRevenue = deliveredOrders.reduce((acc, curr) => acc + curr.total_price, 0);
           const fulfilledVolume = deliveredOrders.reduce((acc, curr) => acc + curr.quantity, 0);
           const avgOrderValue = deliveredOrders.length > 0 ? Math.round(totalRevenue / deliveredOrders.length) : 0;
-          const rejectionRate = orders.length > 0 ? Math.round((orders.filter(o => o.status === 'declined').length / orders.length) * 100) : 0;
+          const rejectionRate = orders.length > 0 ? Math.round((orders.filter(o => o.status === 'DECLINED').length / orders.length) * 100) : 0;
 
           // Simple grouping for crop breakdown
           const cropStats = {};
@@ -868,11 +881,8 @@ const FarmerDashboard = () => {
                                      const validationError = validateImageFile(file);
                                      if (validationError) { alert(validationError); return; }
                                      try {
-                                         const fileName = `farmer-p-${user.id}-${Date.now()}`;
-                                         const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, file);
-                                         if (uploadError) throw uploadError;
-                                         const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-                                         await supabase.from('profiles').update({ photo_url: data.publicUrl }).eq('id', user.id);
+                                         const publicUrl = await uploadImage(file, 'profile');
+                                         await supabase.from('profiles').update({ photo_url: publicUrl }).eq('id', user.id);
                                          window.location.reload();
                                      } catch (err) { alert(err.message); }
                                  }
@@ -880,7 +890,6 @@ const FarmerDashboard = () => {
                         </label>
                     </div>
                     <h3 className="text-2xl font-black text-green-deep font-playfair">{profile?.first_name} {profile?.last_name}</h3>
-                    <p className="text-[10px] font-black uppercase text-green-fresh tracking-widest mt-1">Verified Agro-Farmer</p>
                     
                     <div className="w-full mt-10 space-y-4 border-t border-cream-dark pt-8 text-left">
                         <div className="flex justify-between items-center bg-cream/30 p-3 rounded-xl border border-cream-dark/50">
@@ -992,7 +1001,7 @@ const FarmerDashboard = () => {
                                         <div className="absolute top-1/2 left-0 w-full h-[2px] bg-cream-dark -translate-y-1/2" />
                                         <div 
                                             className="absolute top-1/2 left-0 h-[2px] bg-amber -translate-y-1/2 transition-all duration-1000"
-                                            style={{ width: (order.status === 'COMPLETED' || order.status === 'delivered') ? '100%' : '50%' }}
+                                            style={{ width: (order.status === 'COMPLETED' || order.status === 'DELIVERED') ? '100%' : '50%' }}
                                         />
 
                                         <div className="relative z-10 flex flex-col items-center">
@@ -1001,27 +1010,27 @@ const FarmerDashboard = () => {
                                         </div>
 
                                         <div className="relative z-10 flex flex-col items-center">
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'bg-green-fresh shadow-lg' : 'bg-amber text-white shadow-[0_0_20px_rgba(245,158,11,0.4)]'}`}>
-                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? '✅' : '🛡️'}
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'bg-green-fresh shadow-lg' : 'bg-amber text-white shadow-[0_0_20px_rgba(245,158,11,0.4)]'}`}>
+                                                {(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? '✅' : '🛡️'}
                                             </div>
-                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber animate-pulse'}`}>
-                                                {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'Order Completed' : 'Payment Verified'}
+                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'text-green-fresh' : 'text-amber animate-pulse'}`}>
+                                                {(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'Order Completed' : 'Payment Verified'}
                                             </p>
                                         </div>
 
                                         <div className="relative z-10 flex flex-col items-center">
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'bg-green-fresh text-white shadow-lg' : 'bg-cream-dark text-gray-300'}`}>💰</div>
-                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-gray-300'}`}>Arrived in Bank</p>
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'bg-green-fresh text-white shadow-lg' : 'bg-cream-dark text-gray-300'}`}>💰</div>
+                                            <p className={`text-[9px] font-black uppercase mt-2 ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'text-green-fresh' : 'text-gray-300'}`}>Arrived in Bank</p>
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="bg-cream/30 p-6 rounded-[24px] text-center lg:text-right min-w-[220px]">
                                     <p className="text-[10px] font-black text-gray-400 uppercase mb-1 tracking-tighter">Current Money Status</p>
-                                    <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'delivered') ? 'text-green-fresh' : 'text-amber'}`}>
-                                        {(order.status === 'COMPLETED' || order.status === 'delivered') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
+                                    <p className={`text-md font-black uppercase ${(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'text-green-fresh' : 'text-amber'}`}>
+                                        {(order.status === 'COMPLETED' || order.status === 'DELIVERED') ? 'ORDER COMPLETED' : 'PAYMENT RECORDED'}
                                     </p>
-                                    {order.status !== 'COMPLETED' && order.status !== 'delivered' && (
+                                    {order.status !== 'COMPLETED' && order.status !== 'DELIVERED' && (
                                         <p className="text-[9px] text-gray-400 italic mt-2">Automatic farmer payouts are not configured yet.</p>
                                     )}
                                 </div>

@@ -19,13 +19,8 @@ const Products = () => {
         setProducts(data || []);
       } catch (error) {
         console.error("Error fetching products:", error.message);
-        // Fallback to static sample if database is empty/missing
-        setProducts([
-            { id: 1, emoji: '🍅', name: 'Desi Tomatoes', price: 45, unit: 'kg', farm: 'Ramesh Farm', category: 'Vegetables', rating: 4.8 },
-            { id: 2, emoji: '🥕', name: 'Crunchy Carrots', price: 35, unit: 'kg', farm: 'Green Valley', category: 'Vegetables', rating: 4.5 },
-            { id: 3, emoji: '🥭', name: 'Alphonso Mangoes', price: 120, unit: 'kg', farm: 'Suresh Farms', category: 'Fruits', rating: 4.9 },
-            { id: 4, emoji: '🌽', name: 'Golden Maize', price: 22, unit: 'kg', farm: 'Punjab Fields', category: 'Grains', rating: 4.7 },
-        ]);
+        // No fallback data: an empty catalogue is shown honestly.
+        setProducts([]);
       } finally {
         setLoading(false);
       }
@@ -85,25 +80,28 @@ const Products = () => {
                 key={product.id}
                 className="bg-white rounded-[24px] p-6 shadow-sm border border-transparent hover:border-green-fresh hover:shadow-[0_20px_50px_rgba(45,106,79,0.08)] transition-all duration-300 group"
               >
-                <div className="w-full h-40 bg-cream-dark rounded-[20px] flex items-center justify-center text-6xl mb-6 group-hover:scale-105 transition-transform duration-300">
-                  {product.emoji}
-                </div>
+                {product.image_url_1 ? (
+                  <img src={product.image_url_1} alt={product.name} className="w-full h-40 object-cover rounded-[20px] mb-6 group-hover:scale-105 transition-transform duration-300" />
+                ) : (
+                  <div className="w-full h-40 bg-cream-dark rounded-[20px] flex items-center justify-center text-6xl mb-6 group-hover:scale-105 transition-transform duration-300">
+                    🌾
+                  </div>
+                )}
                 
                 <div className="flex justify-between items-start mb-1">
                   <span className="text-xs font-bold text-green-mid uppercase tracking-wider">{product.category}</span>
-                  <span className="text-sm font-bold text-amber">⭐ {product.rating}</span>
                 </div>
                 
                 <h3 className="font-playfair text-xl font-bold text-green-deep mb-1">{product.name}</h3>
-                <p className="text-xs text-gray-500 mb-4 tracking-wide">📍 {product.farm}</p>
+                {product.address && <p className="text-xs text-gray-500 mb-4 tracking-wide">📍 {product.address}</p>}
                 
                 <div className="flex items-center justify-between mt-auto">
                   <div>
-                    <span className="text-xl font-black text-green-deep">₹{product.price}</span>
+                    <span className="text-xl font-black text-green-deep">₹{product.user_price ?? product.price}</span>
                     <span className="text-xs text-gray-400 font-medium ml-1">/{product.unit}</span>
                   </div>
                   
-                  {product.farmer_id ? <Link to={`/checkout?productId=${product.id}`} className="px-4 py-2 bg-green-deep text-white rounded-full font-bold text-sm hover:bg-green-mid transition-all shadow-md">Buy Now</Link> : <span className="text-xs text-gray-400">Sample product</span>}
+                  {product.farmer_id && <Link to={`/checkout?productId=${product.id}`} className="px-4 py-2 bg-green-deep text-white rounded-full font-bold text-sm hover:bg-green-mid transition-all shadow-md">Buy Now</Link>}
                 </div>
               </div>
             ))}
