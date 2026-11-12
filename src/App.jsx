@@ -16,6 +16,8 @@ import Requirements from './pages/Requirements';
 import NegotiationThread from './pages/NegotiationThread';
 import GroupBuys from './pages/GroupBuys';
 import GroupBuyDetail from './pages/GroupBuyDetail';
+import Transporters from './pages/Transporters';
+import ShipmentTracking from './pages/ShipmentTracking';
 import VerificationQueue from './pages/admin/VerificationQueue';
 import Checkout from './pages/Checkout';
 import EscrowTest from './pages/EscrowTest';
@@ -37,6 +39,8 @@ function App() {
             <Route path="/negotiations/:id" element={<NegotiationThread />} />
             <Route path="/group-buys" element={<GroupBuys />} />
             <Route path="/group-buys/:id" element={<GroupBuyDetail />} />
+            <Route path="/transporters" element={<Transporters />} />
+            <Route path="/shipments/:id/track" element={<ShipmentTracking />} />
             <Route path="/farmer-dashboard" element={<FarmerDashboard />} />
             <Route path="/buyer-dashboard" element={<BuyerDashboard />} />
             <Route path="/spent-analysis" element={<SpentAnalysis />} />
