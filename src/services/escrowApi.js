@@ -56,6 +56,29 @@ export async function adminFetch(path, opts = {}) {
   return authedFetch('/api/admin', path, opts);
 }
 
+// Public passport reads (/api/farmers/:id/passport, /api/products/:id/passport).
+// No session required: anyone may view a verified farmer's passport. Throws
+// the backend's message on failure; the HTTP status is attached to the
+// error so callers can tell a 404 (no verified passport) from a real error.
+export async function publicPassportFetch(path) {
+  const res = await fetch(`${ESCROW_API_URL}/api${path}`);
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const error = new Error(data.error || data.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+
+  return data;
+}
+
+// Farmer's own passports (/api/passports/*): create + list own lots.
+export async function passportFetch(path, opts = {}) {
+  return authedFetch('/api/passports', path, opts);
+}
+
 // Image upload (/api/uploads/*): the file goes as the raw request body so
 // the backend can verify its real bytes (MIME + magic bytes) before it
 // reaches storage. Client-side validateImageFile stays as the first gate.
