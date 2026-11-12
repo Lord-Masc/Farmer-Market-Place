@@ -21,6 +21,7 @@ import ShipmentTracking from './pages/ShipmentTracking';
 import Disputes from './pages/Disputes';
 import DisputeDetail from './pages/DisputeDetail';
 import Assistant from './pages/Assistant';
+import Notifications from './pages/Notifications';
 import VerificationQueue from './pages/admin/VerificationQueue';
 import Checkout from './pages/Checkout';
 import EscrowTest from './pages/EscrowTest';
@@ -47,6 +48,7 @@ function App() {
             <Route path="/disputes" element={<Disputes />} />
             <Route path="/disputes/:id" element={<DisputeDetail />} />
             <Route path="/assistant" element={<Assistant />} />
+            <Route path="/notifications" element={<Notifications />} />
             <Route path="/farmer-dashboard" element={<FarmerDashboard />} />
             <Route path="/buyer-dashboard" element={<BuyerDashboard />} />
             <Route path="/spent-analysis" element={<SpentAnalysis />} />
