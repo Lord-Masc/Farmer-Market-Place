@@ -16,14 +16,11 @@
 // groups_total, notification buckets) are 0 when the table is empty —
 // zero rows IS a real measurement for a count.
 //
-// MANDI COMPARISON NEEDS STAGE 3: the mandi_prices table does NOT exist
-// (Stage 3 is blocked on the data.gov.in API key). The read below is
-// GUARDED (same isTableMissing pattern as the Stage 8 price tool): a
-// missing table returns null, never an invented number. When Stage 3
-// lands, this lights up with no other change — EXCEPT the row shape:
-// the modal is read from mandi_prices.price, assumed to be RUPEES per
-// unit (the Stage 8 assumption: price x 100 = paise). If Stage 3's
-// price column turns out to be paise already, drop the x 100 here.
+// MANDI COMPARISON (Stage 3, landed): the mandi_prices table holds the
+// canonical shape — modal_price is RUPEES per quintal, so modal x 100 =
+// paise. The read below is GUARDED (same isTableMissing pattern as the
+// Stage 8 price tool): a missing table returns null, never an invented
+// number.
 //
 // Reconciliation reads the admin_stuck_money view (migration
 // 20261125_admin_views.sql). The live metrics below compute from the
@@ -66,12 +63,12 @@ async function fetchAll(table, columns) {
 // no rows, or no finite prices. Ties keep the first most-frequent price.
 async function getMandiModalPaise() {
   try {
-    const { data, error } = await supabaseAdmin.from('mandi_prices').select('price');
+    const { data, error } = await supabaseAdmin.from('mandi_prices').select('modal_price');
     if (error) {
       if (isTableMissing(error)) return null;
       throw error;
     }
-    const prices = (data || []).map((r) => Number(r.price)).filter(Number.isFinite);
+    const prices = (data || []).map((r) => Number(r.modal_price)).filter(Number.isFinite);
     if (prices.length === 0) return null;
     const counts = new Map();
     for (const p of prices) counts.set(p, (counts.get(p) || 0) + 1);

@@ -522,7 +522,7 @@ async function getNegotiationThread(callerId, requirementId) {
     requirement,
     offers: offers || [],
     agreement: agreement || null,
-    fairPriceAnchor: getFairPriceAnchor(requirement.crop),
+    fairPriceAnchor: await getFairPriceAnchor(requirement.crop),
   };
 }
 
