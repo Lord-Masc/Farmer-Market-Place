@@ -103,6 +103,50 @@ export async function negotiationsFetch(path, opts = {}) {
   return authedFetch('/api/negotiations', path, opts);
 }
 
+// Group buys (Stage 5, module D). Request bodies use the repo's house
+// style (snake_case): threshold_quantity, contribution_quantity,
+// target_price, delivery_window_start/end, product_id, unit_price,
+// delivery_address, buyer_phone. Settlement amounts arrive in integer
+// paise (amount_paise) — callers render them as rupees (paise / 100).
+export async function groupBuysFetch(path, opts = {}) {
+  return authedFetch('/api/group-buys', path, opts);
+}
+
+export async function listGroupBuys(status) {
+  return groupBuysFetch(status ? `?status=${encodeURIComponent(status)}` : '/');
+}
+
+export async function getGroupBuy(id) {
+  return groupBuysFetch(`/${id}`);
+}
+
+export async function createGroupBuy(body) {
+  return groupBuysFetch('/', { method: 'POST', body });
+}
+
+export async function joinGroupBuy(id, body) {
+  return groupBuysFetch(`/${id}/join`, { method: 'POST', body });
+}
+
+export async function negotiateGroupBuy(id, body) {
+  return groupBuysFetch(`/${id}/negotiate`, { method: 'POST', body });
+}
+
+export async function closeGroupBuy(id, body) {
+  // The backend replays the close only for this derived key — a retry
+  // after a network failure returns the same order + settlements
+  // instead of a 409, and nothing is ever duplicated.
+  return groupBuysFetch(`/${id}/close`, {
+    method: 'POST',
+    body,
+    headers: { 'Idempotency-Key': `group-buy-close-${id}` },
+  });
+}
+
+export async function getGroupBuySettlement(id) {
+  return groupBuysFetch(`/${id}/settlement`);
+}
+
 // Image upload (/api/uploads/*): the file goes as the raw request body so
 // the backend can verify its real bytes (MIME + magic bytes) before it
 // reaches storage. Client-side validateImageFile stays as the first gate.
