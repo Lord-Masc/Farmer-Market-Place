@@ -84,7 +84,7 @@ function validatePriceTiers(tiers) {
 }
 
 function validateRequirementInput(body = {}) {
-  const { crop, quantity, quality, delivery_window_start, delivery_window_end, target_price } = body;
+  const { crop, quantity, quality, delivery_window_start, delivery_window_end, target_price, group_buy_id } = body;
   if (!isNonEmptyString(crop, 120)) {
     throw validationError('crop must be a non-empty string of at most 120 characters.');
   }
@@ -104,6 +104,13 @@ function validateRequirementInput(body = {}) {
   }
   const target = positiveNumber(target_price);
   if (target === null) throw validationError('target_price must be a number greater than 0.');
+  // Stage 5: a requirement may speak for a group buy — the id is just
+  // carried through (a non-empty string when present); the group service
+  // sets it, never an arbitrary caller.
+  if (group_buy_id !== undefined && group_buy_id !== null
+    && (typeof group_buy_id !== 'string' || !group_buy_id.trim())) {
+    throw validationError('group_buy_id must be a non-empty string.');
+  }
   return {
     crop: crop.trim(),
     quantity: qty,
@@ -111,6 +118,7 @@ function validateRequirementInput(body = {}) {
     delivery_window_start,
     delivery_window_end,
     target_price: target,
+    group_buy_id: group_buy_id === undefined || group_buy_id === null ? null : group_buy_id.trim(),
   };
 }
 
@@ -221,6 +229,23 @@ async function createOffer(farmerId, requirementId, body) {
     throw new AppError(409, 'REQUIREMENT_NOT_OPEN', 'This requirement is no longer open for offers.');
   }
   const input = validateOfferInput(body);
+  // Stage 5: an offer on a group requirement must cover the WHOLE pooled
+  // quantity — the group negotiates as one buyer, so a partial quote can
+  // never become the pooled order. The total is summed in JS (the
+  // in-memory mock has no SUM); a mismatch is a 422, not a 409.
+  if (requirement.group_buy_id) {
+    const { data: participants, error: participantsError } = await supabaseAdmin
+      .from('group_buy_participants')
+      .select('*')
+      .eq('group_buy_id', requirement.group_buy_id);
+    if (participantsError) throw participantsError;
+    const pooled = (participants || []).reduce(
+      (sum, p) => sum + Number(p.contribution_quantity), 0,
+    );
+    if (input.quantity !== pooled) {
+      throw validationError('offers on a group requirement must match the pooled quantity.');
+    }
+  }
   const { data: productRows, error: productError } = await supabaseAdmin
     .from('products')
     .select('id,farmer_id')
