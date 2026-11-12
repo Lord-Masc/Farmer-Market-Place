@@ -33,6 +33,7 @@
 const supabaseAdmin = require('../utils/supabaseAdmin');
 const { AppError } = require('../utils/errors');
 const { logAudit } = require('../utils/auditLog');
+const notificationService = require('./notificationService');
 const negotiationService = require('./negotiationService');
 const escrowService = require('./escrowService');
 const { createSettlements } = require('./groupSettlementService');
@@ -258,6 +259,12 @@ async function joinGroup(callerId, groupId, body = {}) {
   }
   const participant = getSingle(inserted);
   await logAudit(callerId, 'group_buy.joined', { group_buy_id: group.id, participant_id: participant.id });
+  // Stage 9: the group owner learns someone joined.
+  await notificationService.emit({
+    eventId: `group:${group.id}:joined:${participant.id}`, type: 'group_joined',
+    userIds: [group.owner_id],
+    payload: { group_buy_id: group.id, crop: group.crop, contribution_quantity: contribution },
+  });
   return participant;
 }
 
@@ -408,6 +415,21 @@ async function closeGroup(callerId, groupId, body = {}, idempotencyKey) {
   const closedGroup = getSingle(claimed);
   await logAudit(callerId, 'group_buy.closed', {
     group_buy_id: group.id, order_id: order.id, participant_count: participants.length, total_paise: totalPaise,
+  });
+  // Stage 9: everyone in the group learns it closed (owner included —
+  // the owner is not necessarily a participant row), and each
+  // participant learns their settlement is ready. Only the close that
+  // wins the claim emits — a replay returns before this point.
+  const participantIds = [...new Set([...participants.map((p) => p.user_id), callerId])];
+  await notificationService.emit({
+    eventId: `group:${group.id}:closed`, type: 'group_closed',
+    userIds: participantIds,
+    payload: { group_buy_id: group.id, crop: group.crop, order_id: order.id },
+  });
+  await notificationService.emit({
+    eventId: `group:${group.id}:settlement_ready`, type: 'settlement_ready',
+    userIds: participants.map((p) => p.user_id),
+    payload: { group_buy_id: group.id, crop: group.crop, order_id: order.id },
   });
   return { group_buy: closedGroup, order, settlements };
 }

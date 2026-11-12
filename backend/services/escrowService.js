@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const { AppError, notAccessible } = require('../utils/errors');
 const { logAudit } = require('../utils/auditLog');
+const notificationService = require('./notificationService');
 
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -211,6 +212,13 @@ exports.createMarketplaceOrder = async (buyerId, input = {}, idempotencyKey, opt
             }).eq('key', idempotencyKey).eq('user_id', buyerId);
         }
         await logAudit(buyerId, 'order.created', { order_id: order.id, product_id: product.id });
+        // Stage 9: buyer + farmer learn an order exists (best-effort —
+        // emit never throws into order creation).
+        await notificationService.emit({
+            eventId: `order:${order.id}:created`, type: 'order_created',
+            userIds: [buyerId, product.farmer_id],
+            payload: { order_id: order.id, total_price: total, quantity: qty, unit },
+        });
         return order;
     } catch (err) {
         // A failed attempt frees the key so the client can retry with it.
@@ -375,6 +383,12 @@ exports.verifyAndMarkPaid = async (order_id, razorpay_order_id, razorpay_payment
     // logged; a replay (order already PAID) returns below without a row.
     if (paidOrder) {
         await logAudit(buyer_id, 'order.paid', { order_id });
+        // Stage 9: the farmer learns the order is paid.
+        await notificationService.emit({
+            eventId: `order:${order_id}:paid`, type: 'order_paid',
+            userIds: [order.farmer_id],
+            payload: { order_id, total_price: order.total_price },
+        });
         return paidOrder;
     }
 
@@ -431,6 +445,12 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
         }
         const confirmed = getSingle(Array.isArray(data) ? data : data ? [data] : null);
         await logAudit(farmerId, 'order.confirmed', { order_id: orderId });
+        // Stage 9: the buyer learns the farmer approved the order.
+        await notificationService.emit({
+            eventId: `order:${orderId}:confirmed`, type: 'order_confirmed',
+            userIds: [order.buyer_id],
+            payload: { order_id: orderId, total_price: order.total_price },
+        });
         return confirmed;
     }
 
@@ -440,6 +460,12 @@ exports.updateOrderStatusWithStock = async (orderId, farmerId, newStatus) => {
     const updated = getSingle(data);
     if (!updated) throw new AppError(409, 'INVALID_TRANSITION', 'This order has already been processed.');
     await logAudit(farmerId, 'order.declined', { order_id: orderId });
+    // Stage 9: the buyer learns the farmer declined the order.
+    await notificationService.emit({
+        eventId: `order:${orderId}:declined`, type: 'order_declined',
+        userIds: [order.buyer_id],
+        payload: { order_id: orderId, total_price: order.total_price },
+    });
     return updated;
 };
 
@@ -461,6 +487,12 @@ exports.markOrderAsShipped = async (order_id, farmer_id) => {
         throw new AppError(409, 'ORDER_NOT_SHIPPABLE', 'Only a paid order can be shipped.');
     }
     await logAudit(farmer_id, 'order.shipped', { order_id });
+    // Stage 9: the buyer learns the order shipped.
+    await notificationService.emit({
+        eventId: `order:${order_id}:shipped`, type: 'order_shipped',
+        userIds: [order.buyer_id],
+        payload: { order_id, total_price: order.total_price },
+    });
     return updated;
 };
 
@@ -516,6 +548,13 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
     }
 
     await logAudit(buyer_id, 'order.completed', { order_id });
+    // Stage 9: buyer + farmer learn the order completed (and the
+    // payment released).
+    await notificationService.emit({
+        eventId: `order:${order_id}:completed`, type: 'order_completed',
+        userIds: [order.buyer_id, order.farmer_id],
+        payload: { order_id, total_price: order.total_price },
+    });
     return updated;
 };
 
@@ -553,6 +592,16 @@ exports.markRefundPending = async (order_id, opts = {}) => {
     if (requested && buyerId !== null) {
         await logAudit(buyerId, 'order.refund_requested', { order_id });
     }
+    // Stage 9: the farmer learns a refund was requested — manual AND
+    // cron-enqueued alike (a system enqueue is still a refund the
+    // farmer must know about). A null row (no transition) emits nothing.
+    if (requested) {
+        await notificationService.emit({
+            eventId: `order:${order_id}:refund_requested`, type: 'refund_requested',
+            userIds: [order.farmer_id],
+            payload: { order_id, total_price: order.total_price },
+        });
+    }
     return requested;
 };
 
@@ -586,6 +635,25 @@ async function completeRefundStatuses(order_id, gatewayRefundId, message) {
     // reconciler) — actor is null: the initiator is not known here, and
     // the gateway refund id is the traceable handle.
     await logAudit(null, 'order.refunded', { order_id, gateway_refund_id: gatewayRefundId });
+    // Stage 9: the buyer learns the refund completed. The buyer id is
+    // resolved from the order row here (this function only knows the
+    // order id) — a failed lookup emits nothing, never breaks the
+    // refund. A PARTIAL refund does not come through here (see
+    // refundPartialOrder): the dispute_resolved notification covers it.
+    try {
+        const { data: orderRows } = await supabase
+            .from('orders').select('buyer_id,total_price').eq('id', order_id);
+        const refundedOrder = getSingle(orderRows);
+        if (refundedOrder) {
+            await notificationService.emit({
+                eventId: `order:${order_id}:refunded`, type: 'refunded',
+                userIds: [refundedOrder.buyer_id],
+                payload: { order_id, total_price: refundedOrder.total_price },
+            });
+        }
+    } catch (err) {
+        console.error('Refund notification failed:', err.message);
+    }
     return { success: true, message, gateway_refund_id: gatewayRefundId };
 }
 

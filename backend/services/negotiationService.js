@@ -25,6 +25,7 @@ const supabaseAdmin = require('../utils/supabaseAdmin');
 const { AppError } = require('../utils/errors');
 const { logAudit } = require('../utils/auditLog');
 const escrowService = require('./escrowService');
+const notificationService = require('./notificationService');
 const { getFairPriceAnchor } = require('./fairPriceAnchor');
 
 const getSingle = (data) => (data && data.length > 0 ? data[0] : null);
@@ -272,6 +273,12 @@ async function createOffer(farmerId, requirementId, body) {
   if (error) throw error;
   const offer = getSingle(inserted);
   await logAudit(farmerId, 'offer.created', { requirement_id: requirement.id, offer_id: offer.id });
+  // Stage 9: the requirement owner learns a farmer quoted.
+  await notificationService.emit({
+    eventId: `offer:${offer.id}:received`, type: 'offer_received',
+    userIds: [requirement.buyer_id],
+    payload: { requirement_id: requirement.id, offer_id: offer.id, price: offer.price, quantity: offer.quantity, crop: requirement.crop },
+  });
   return offer;
 }
 
@@ -318,6 +325,12 @@ async function counterOffer(callerId, offerId, body) {
   const counter = getSingle(inserted);
   await logAudit(callerId, 'offer.countered', { requirement_id: requirement.id, offer_id: offer.id, counter_offer_id: counter.id });
   await logAudit(callerId, 'offer.created', { requirement_id: requirement.id, offer_id: counter.id });
+  // Stage 9: the maker of the original offer learns it was countered.
+  await notificationService.emit({
+    eventId: `offer:${counter.id}:countered`, type: 'offer_countered',
+    userIds: [offer.created_by],
+    payload: { requirement_id: requirement.id, offer_id: counter.id, price: counter.price, quantity: counter.quantity, crop: requirement.crop },
+  });
   return counter;
 }
 
@@ -435,10 +448,22 @@ async function acceptOffer(callerId, offerId, body = {}, idempotencyKey) {
     .select('*');
   for (const row of rejected || []) {
     await logAudit(callerId, 'offer.rejected', { requirement_id: requirement.id, offer_id: row.id });
+    // Stage 9: each competing offer's maker learns it was rejected.
+    await notificationService.emit({
+      eventId: `offer:${row.id}:rejected`, type: 'offer_rejected',
+      userIds: [row.created_by],
+      payload: { requirement_id: requirement.id, offer_id: row.id, price: row.price, crop: requirement.crop },
+    });
   }
 
   await logAudit(callerId, 'offer.accepted', { requirement_id: requirement.id, offer_id: offer.id, agreement_id: agreement.id, order_id: order.id });
   await logAudit(callerId, 'agreement.created', { requirement_id: requirement.id, offer_id: offer.id, agreement_id: agreement.id, order_id: order.id });
+  // Stage 9: both parties learn the offer was accepted at the locked price.
+  await notificationService.emit({
+    eventId: `offer:${offer.id}:accepted`, type: 'offer_accepted',
+    userIds: [requirement.buyer_id, offer.farmer_id],
+    payload: { requirement_id: requirement.id, offer_id: offer.id, price: offer.price, quantity: offer.quantity, order_id: order.id, crop: requirement.crop },
+  });
   return { agreement, order };
 }
 

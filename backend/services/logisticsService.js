@@ -35,6 +35,7 @@ const crypto = require('crypto');
 const supabaseAdmin = require('../utils/supabaseAdmin');
 const { AppError, notAccessible } = require('../utils/errors');
 const { logAudit } = require('../utils/auditLog');
+const notificationService = require('./notificationService');
 const { markOrderAsShipped, markOrderAsCompleted } = require('./escrowService');
 
 const EARTH_RADIUS_KM = 6371;
@@ -255,6 +256,13 @@ async function bookShipment(farmerId, body = {}) {
   }
   await appendEvent(id, 'booked', farmerId);
   await logAudit(farmerId, 'shipment.booked', { shipment_id: id, order_id, transporter_id: shipment.transporter_id, price_paise });
+  // Stage 9: buyer + farmer learn the delivery was booked. (The escrow
+  // call above already emitted order_shipped to the buyer.)
+  await notificationService.emit({
+    eventId: `shipment:${id}:booked`, type: 'shipment_booked',
+    userIds: [order.buyer_id, order.farmer_id],
+    payload: { shipment_id: id, order_id, price_paise },
+  });
   return publicShipment(shipment);
 }
 
@@ -321,6 +329,13 @@ async function updateShipmentStatus(callerId, shipmentId, { status, lat, lng } =
   } else {
     await logAudit(callerId, 'shipment.status', { shipment_id: shipmentId, status });
   }
+  // Stage 9: buyer + farmer learn the delivery status changed
+  // (cancelled included — it is a status change).
+  await notificationService.emit({
+    eventId: `shipment:${shipmentId}:status:${status}`, type: 'shipment_status',
+    userIds: [order.buyer_id, order.farmer_id],
+    payload: { shipment_id: shipmentId, order_id: shipment.order_id, status },
+  });
   return publicShipment(row);
 }
 
@@ -399,6 +414,13 @@ async function verifyOtp(callerId, shipmentId, { otp, proof_photo_path } = {}) {
   await appendEvent(shipmentId, 'delivered', callerId);
   await logAudit(callerId, 'shipment.otp_verified', { shipment_id: shipmentId, order_id: shipment.order_id });
   await logAudit(callerId, 'shipment.delivered', { shipment_id: shipmentId, order_id: shipment.order_id });
+  // Stage 9: buyer + farmer learn the delivery completed. (The escrow
+  // call above already emitted order_completed to both.)
+  await notificationService.emit({
+    eventId: `shipment:${shipmentId}:delivered`, type: 'shipment_delivered',
+    userIds: [order.buyer_id, order.farmer_id],
+    payload: { shipment_id: shipmentId, order_id: shipment.order_id },
+  });
   return publicShipment(row);
 }
 

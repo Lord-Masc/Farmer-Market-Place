@@ -43,6 +43,7 @@ const crypto = require('crypto');
 const supabaseAdmin = require('../utils/supabaseAdmin');
 const { AppError } = require('../utils/errors');
 const { logAudit } = require('../utils/auditLog');
+const notificationService = require('./notificationService');
 const { validateImageBuffer } = require('../routes/uploadRoutes');
 const {
   markRefundPending,
@@ -203,6 +204,14 @@ async function fileDispute(callerId, { order_id, category, description } = {}) {
     author_role: roleFor(order, callerId, false), body, created_at: createdAt,
   });
   await logAudit(callerId, 'dispute.filed', { dispute_id: dispute.id, order_id, category });
+  // Stage 9: the counterparty learns a dispute was filed, and so do
+  // the admins (zero admins = no admin rows, by design).
+  const counterparty = callerId === order.buyer_id ? order.farmer_id : order.buyer_id;
+  await notificationService.emit({
+    eventId: `dispute:${dispute.id}:filed`, type: 'dispute_filed',
+    userIds: [counterparty], includeAdmins: true,
+    payload: { dispute_id: dispute.id, order_id, category },
+  });
   return publicDispute(dispute, order, await fetchProductTitle(order.product_id));
 }
 
@@ -361,6 +370,12 @@ async function updateStatus(adminId, disputeId, status) {
   }
   const order = await fetchOrder(row.order_id);
   await logAudit(adminId, 'dispute.status_changed', { dispute_id: disputeId, status });
+  // Stage 9: both parties learn the dispute moved forward.
+  await notificationService.emit({
+    eventId: `dispute:${disputeId}:status:${status}`, type: 'dispute_status',
+    userIds: [order.buyer_id, order.farmer_id],
+    payload: { dispute_id: disputeId, order_id: row.order_id, status },
+  });
   return { dispute: publicDispute(row, order, order ? await fetchProductTitle(order.product_id) : null) };
 }
 
@@ -441,6 +456,14 @@ async function resolveDispute(adminId, disputeId, { outcome, amount_paise, note 
   await logAudit(adminId, 'dispute.resolved', {
     dispute_id: disputeId, order_id: order.id, outcome,
     amount_paise: resolutionAmountPaise, replacement_order_id: replacementOrderId,
+  });
+  // Stage 9: both parties learn the dispute resolved (and, for a
+  // refund outcome, the escrow path already emitted refund_requested
+  // + refunded alongside this one — each is a true event).
+  await notificationService.emit({
+    eventId: `dispute:${disputeId}:resolved`, type: 'dispute_resolved',
+    userIds: [order.buyer_id, order.farmer_id],
+    payload: { dispute_id: disputeId, order_id: order.id, outcome, amount_paise: resolutionAmountPaise },
   });
   return { dispute: publicDispute(row, order, await fetchProductTitle(order.product_id)) };
 }
