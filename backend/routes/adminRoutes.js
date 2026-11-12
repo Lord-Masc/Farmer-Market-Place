@@ -12,6 +12,7 @@ const { AppError } = require('../utils/errors');
 const verificationService = require('../services/verificationService');
 const adminMetricsService = require('../services/adminMetricsService');
 const moderationService = require('../services/moderationService');
+const fairPriceService = require('../services/fairPriceService');
 
 router.use(requireAuth, requireAdmin);
 
@@ -147,6 +148,46 @@ router.post('/moderation/:userId/reinstate', async (req, res, next) => {
     if (!req.params.userId) throw new AppError(400, 'MISSING_FIELDS', 'User id is required.');
     const result = await moderationService.reinstateUser(req.user.id, req.params.userId);
     return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// ---- Stage 3: FairPrice cost parameters (module B) ----
+// The net-earnings assumptions (transport, commission, packaging,
+// platform fee, wastage). There is NO official dataset for these —
+// they are platform estimates, set by an admin, labelled "estimated"
+// everywhere they are shown. A PATCH never overwrites: it versions
+// (new row, version+1; the old row stays for audit).
+router.get('/cost-params', async (req, res, next) => {
+  try {
+    const params = await fairPriceService.listCostParams();
+    return res.json({ params });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Create the first parameters for a scope (state + commodity_class;
+// null = all). 409 when a current row already exists for that scope —
+// PATCH it instead.
+router.post('/cost-params', async (req, res, next) => {
+  try {
+    const param = await fairPriceService.createCostParams(req.user.id, req.body || {});
+    return res.status(201).json({ param });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Version the parameters: supersedes row :id (must be current) with a
+// new row carrying the merged values. Body: the five cost fields +
+// optional state / commodity_class (unchanged when omitted).
+router.patch('/cost-params/:id', async (req, res, next) => {
+  try {
+    if (!req.params.id) throw new AppError(400, 'MISSING_FIELDS', 'Cost parameters id is required.');
+    const param = await fairPriceService.updateCostParams(req.params.id, req.user.id, req.body || {});
+    return res.json({ param });
   } catch (err) {
     return next(err);
   }
