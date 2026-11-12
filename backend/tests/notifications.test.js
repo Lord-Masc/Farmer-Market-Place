@@ -78,6 +78,16 @@ function makeSupabaseMock(db) {
       if (f.type === 'lt' && !(row[f.col] < f.val)) return false;
       if (f.type === 'lte' && !(row[f.col] <= f.val)) return false;
       if (f.type === 'gte' && !(row[f.col] >= f.val)) return false;
+      if (f.type === 'or') {
+        // PostgREST or-filter: the row passes if ANY clause matches
+        // (same implementation as the refund.test.js mock).
+        const hit = f.clauses.some((c) => {
+          if (c.op === 'is') return c.val === null ? row[c.col] == null : row[c.col] === c.val;
+          if (c.op === 'lte') return row[c.col] != null && row[c.col] <= c.val;
+          return false;
+        });
+        if (!hit) return false;
+      }
     }
     return true;
   }
@@ -159,6 +169,17 @@ function makeSupabaseMock(db) {
       lt(col, val) { q.filters.push({ type: 'lt', col, val }); return api; },
       lte(col, val) { q.filters.push({ type: 'lte', col, val }); return api; },
       gte(col, val) { q.filters.push({ type: 'gte', col, val }); return api; },
+      // PostgREST or-filter: 'col.op.val,col.op.val' (value is everything
+      // after the second dot, so ISO timestamps with '.' survive).
+      or(str) {
+        const clauses = String(str).split(',').map((part) => {
+          const [col, op, ...rest] = part.split('.');
+          const joined = rest.join('.');
+          return { col, op, val: op === 'is' && joined === 'null' ? null : joined };
+        });
+        q.filters.push({ type: 'or', clauses });
+        return api;
+      },
       limit(n) { q.limit = n; return api; },
       order(col, { ascending = true } = {}) { q.orderBy = { col, ascending }; return api; },
       range(from, to) { q.range = [from, to]; return api; },
@@ -580,6 +601,20 @@ describe('notificationWorker.processPending', () => {
       mockHolder.supabase, adapters({ email: { send } }), { now: new Date('2026-11-12T10:00:00.000Z') },
     );
     expect(counts.processed).toBe(0);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test('50 future-dated rows do not starve a due row — the due predicate is in the query', async () => {
+    const send = jest.fn(async () => ({ ok: true }));
+    const now = new Date('2026-11-12T10:00:00.000Z');
+    for (let i = 0; i < 50; i++) {
+      seedRow({ channel: 'email', next_attempt_at: '2026-11-13T10:00:00.000Z', created_at: '2026-11-12T09:00:00.000Z' });
+    }
+    const dueRow = seedRow({ channel: 'in_app', next_attempt_at: null, created_at: '2026-11-12T10:00:00.000Z' });
+    const counts = await worker.processPending(mockHolder.supabase, adapters({ email: { send } }), { now });
+    expect(counts.processed).toBeGreaterThanOrEqual(1);
+    expect(counts.sent).toBe(1);
+    expect(dueRow.delivery_status).toBe('sent');
     expect(send).not.toHaveBeenCalled();
   });
 

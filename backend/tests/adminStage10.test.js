@@ -260,6 +260,81 @@ describe('adminMetricsService.getPlatformMetrics', () => {
   });
 });
 
+describe('adminMetricsService.getPlatformMetrics small-N suppression (public path)', () => {
+  let service;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    service = require('../services/adminMetricsService');
+  });
+
+  test('one paid order: public suppresses money/rate fields, admin returns the exact values', async () => {
+    mockHolder.admin = makeFakeAdmin(metricTables({
+      orders: [{ id: 'o1', total_price: 1000, quantity: 4, status: 'PAID', created_at: '2026-11-10T09:00:00.000Z', completed_at: null, delivery_deadline: '2026-11-12T12:00:00.000Z' }],
+      payments: [{ order_id: 'o1', status: 'HELD' }],
+      group_buys: [], participants: [], notifications: [],
+      disputes: [{ status: 'resolved', created_at: '2026-11-05T10:00:00.000Z', resolved_at: '2026-11-06T10:00:00.000Z' }],
+    }), { mandiMissing: true });
+    const pub = await service.getPlatformMetrics({ suppressSmallN: true });
+    expect(pub.gmv_paise).toBeNull();
+    expect(pub.median_realisation_paise).toBeNull();
+    expect(pub.group_selling.pooled_gmv_paise).toBeNull();
+    expect(pub.avg_resolution_hours).toBeNull();
+    expect(pub.dispute_rate).toBeNull();
+    expect(pub.on_time_rate).toBeNull();
+    expect(pub.total_orders).toBe(1);
+    expect(pub.dispute_count).toBe(1);
+    const admin = await service.getPlatformMetrics();
+    expect(admin.gmv_paise).toBe(100000);
+    expect(admin.median_realisation_paise).toBe(25000);
+    expect(admin.avg_resolution_hours).toBe(24);
+    expect(admin.dispute_rate).toBe(1);
+    expect(admin.on_time_rate).toBeNull();
+  });
+
+  test('six-order fixture under suppression: money fields null, dispute_rate survives at N=6', async () => {
+    mockHolder.admin = makeFakeAdmin(metricTables(), { mandiMissing: true });
+    const pub = await service.getPlatformMetrics({ suppressSmallN: true });
+    // paidOrders 4 < 5 -> gmv/median null; linkedOrders 2 < 5 -> pooled null;
+    // resolutionHours 1 < 5 -> avg null; orders 6 >= 5 -> dispute_rate stays;
+    // eligible 2 < 5 -> on_time null.
+    expect(pub.gmv_paise).toBeNull();
+    expect(pub.median_realisation_paise).toBeNull();
+    expect(pub.group_selling.pooled_gmv_paise).toBeNull();
+    expect(pub.avg_resolution_hours).toBeNull();
+    expect(pub.dispute_rate).toBe(0.3333);
+    expect(pub.on_time_rate).toBeNull();
+    expect(pub.total_orders).toBe(6);
+    expect(pub.dispute_count).toBe(2);
+  });
+
+  test('five paid orders: suppression lifts at the threshold', async () => {
+    const five = [1, 2, 3, 4, 5].map((n) => ({
+      id: `o${n}`, total_price: 100, quantity: 1, status: 'COMPLETED',
+      created_at: '2026-11-09T09:00:00.000Z', completed_at: '2026-11-10T10:00:00.000Z',
+      delivery_deadline: '2026-11-10T12:00:00.000Z',
+    }));
+    mockHolder.admin = makeFakeAdmin(metricTables({
+      orders: five,
+      payments: five.map((o) => ({ order_id: o.id, status: 'RELEASED' })),
+      group_buys: five.map((o, i) => ({ id: `g${i + 1}`, status: 'closed', order_id: o.id })),
+      participants: five.map((o, i) => ({ group_buy_id: `g${i + 1}`, contribution_quantity: 100 })),
+      notifications: [],
+      disputes: five.map(() => ({
+        status: 'resolved', created_at: '2026-11-05T10:00:00.000Z', resolved_at: '2026-11-06T10:00:00.000Z',
+      })),
+    }), { mandiMissing: true });
+    const pub = await service.getPlatformMetrics({ suppressSmallN: true });
+    expect(pub.gmv_paise).toBe(50000);
+    expect(pub.median_realisation_paise).toBe(10000);
+    expect(pub.group_selling.pooled_gmv_paise).toBe(50000);
+    expect(pub.avg_resolution_hours).toBe(24);
+    expect(pub.dispute_rate).toBe(1);
+    expect(pub.on_time_rate).toBe(1);
+  });
+});
+
 describe('adminMetricsService.getStuckMoney', () => {
   let service;
 

@@ -30,6 +30,7 @@ jest.mock('../services/fairPriceService', () => ({
   listCostParams: jest.fn(),
   listAlerts: jest.fn(),
   createAlert: jest.fn(),
+  deleteAlert: jest.fn(),
 }));
 
 const fairPriceService = require('../services/fairPriceService');
@@ -67,9 +68,10 @@ function handlerOf(routes, method, routePath) {
 }
 
 describe('routes mount the right guards', () => {
-  test('the router exposes exactly the six fairprice routes', () => {
+  test('the router exposes exactly the seven fairprice routes', () => {
     const routes = require('../routes/fairPriceRoutes');
     expect(routeList(routes)).toEqual([
+      'DELETE /alerts/:id',
       'GET /:commodity',
       'GET /:commodity/history',
       'GET /:commodity/net-earnings',
@@ -81,7 +83,7 @@ describe('routes mount the right guards', () => {
 
   test('/alerts routes sit behind requireAuth (unauthenticated callers get 401)', async () => {
     const routes = require('../routes/fairPriceRoutes');
-    for (const [method, routePath] of [['get', '/alerts'], ['post', '/alerts']]) {
+    for (const [method, routePath] of [['get', '/alerts'], ['post', '/alerts'], ['delete', '/alerts/:id']]) {
       const layer = findRoute(routes, method, routePath);
       const authLayer = layer.route.stack.find((l) => l.name === 'requireAuth');
       expect(authLayer).toBeDefined();
@@ -100,7 +102,7 @@ describe('routes mount the right guards', () => {
 
   test('every route carries its own per-route rateLimit layer', () => {
     const routes = require('../routes/fairPriceRoutes');
-    for (const [method, routePath] of [['get', '/:commodity'], ['get', '/:commodity/history'], ['get', '/:commodity/net-earnings'], ['get', '/cost-params'], ['get', '/alerts'], ['post', '/alerts']]) {
+    for (const [method, routePath] of [['get', '/:commodity'], ['get', '/:commodity/history'], ['get', '/:commodity/net-earnings'], ['get', '/cost-params'], ['get', '/alerts'], ['post', '/alerts'], ['delete', '/alerts/:id']]) {
       const layer = findRoute(routes, method, routePath);
       expect(layer.route.stack.length).toBeGreaterThanOrEqual(2);
     }
@@ -265,5 +267,24 @@ describe('alerts', () => {
     const { jsonArgs } = await runLayer(handler, { user: { id: 'u1' } });
     expect(fairPriceService.listAlerts).toHaveBeenCalledWith('u1');
     expect(jsonArgs[0]).toEqual({ alerts: [{ id: 'a1' }] });
+  });
+
+  test('DELETE /alerts/:id deletes the caller’s own alert and answers 200', async () => {
+    const routes = require('../routes/fairPriceRoutes');
+    fairPriceService.deleteAlert.mockResolvedValue({ id: 'a1', commodity: 'Wheat' });
+    const handler = handlerOf(routes, 'delete', '/alerts/:id');
+    const { res, jsonArgs } = await runLayer(handler, { user: { id: 'u1' }, params: { id: 'a1' } });
+    expect(res.statusCode).toBe(200);
+    expect(fairPriceService.deleteAlert).toHaveBeenCalledWith('u1', 'a1');
+    expect(jsonArgs[0]).toMatchObject({ alert: { id: 'a1' } });
+  });
+
+  test('DELETE /alerts/:id passes another user’s 404 to next()', async () => {
+    const routes = require('../routes/fairPriceRoutes');
+    const err = Object.assign(new Error('not found'), { status: 404, code: 'ALERT_NOT_FOUND' });
+    fairPriceService.deleteAlert.mockRejectedValue(err);
+    const handler = handlerOf(routes, 'delete', '/alerts/:id');
+    const { err: out } = await runLayer(handler, { user: { id: 'u1' }, params: { id: 'a2' } });
+    expect(out).toBe(err);
   });
 });

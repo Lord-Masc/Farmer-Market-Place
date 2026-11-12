@@ -60,12 +60,20 @@ function makeFakeAdmin(tables, opts = {}) {
         });
       }
       if (q.limit != null) rows = rows.slice(0, q.limit);
+      // Head + exact count (the per-user alert cap): no rows, just the count.
+      if (q.head && q.countExact) return { data: [], count: rows.length, error: null };
       const out = rows.map((r) => ({ ...r }));
       return { data: q.single ? (out[0] ?? null) : out, error: null };
     }
     if (q.op === 'update') {
       const matched = table.filter((r) => matches(r, q.filters));
       for (const r of matched) Object.assign(r, q.fields);
+      const out = matched.map((r) => ({ ...r }));
+      return { data: q.single ? (out[0] ?? null) : out, error: null };
+    }
+    if (q.op === 'delete') {
+      const matched = table.filter((r) => matches(r, q.filters));
+      for (const r of matched) table.splice(table.indexOf(r), 1);
       const out = matched.map((r) => ({ ...r }));
       return { data: q.single ? (out[0] ?? null) : out, error: null };
     }
@@ -80,11 +88,17 @@ function makeFakeAdmin(tables, opts = {}) {
     return { data: null, error: { message: 'unsupported op' } };
   }
   function builder(table) {
-    const q = { table, op: null, fields: null, row: null, filters: [], limit: null, order: null, single: false };
+    const q = { table, op: null, fields: null, row: null, filters: [], limit: null, order: null, single: false, countExact: false, head: false };
     const api = {
-      select() { if (!q.op) q.op = 'select'; return api; },
+      select(columns, opts) {
+        if (!q.op) q.op = 'select';
+        if (opts && opts.count === 'exact') q.countExact = true;
+        if (opts && opts.head) q.head = true;
+        return api;
+      },
       update(fields) { q.op = 'update'; q.fields = fields; return api; },
       insert(row) { q.op = 'insert'; q.row = row; return api; },
+      delete() { q.op = 'delete'; return api; },
       eq(col, val) { q.filters.push({ type: 'eq', col, val }); return api; },
       in(col, val) { q.filters.push({ type: 'in', col, val }); return api; },
       is(col, val) { q.filters.push({ type: 'is', col, val }); return api; },
@@ -358,6 +372,53 @@ describe('price alerts', () => {
     expect((await service.listAlerts('u1')).map((a) => a.id)).toEqual(['a1']);
     expect(db.price_alerts).toHaveLength(2);
   });
+
+  test('20 alerts is the cap: the 21st create throws 409 ALERT_LIMIT_REACHED', async () => {
+    const alerts = Array.from({ length: 20 }, (_, i) => ({
+      id: `a${i}`, user_id: 'u1', commodity: 'Wheat', threshold_pct: 10, basis: 'yesterday', direction: 'rise',
+    }));
+    const { db, service } = setup({ price_alerts: alerts });
+    await expect(service.createAlert('u1', { commodity: 'Onion', threshold_pct: 10, basis: 'yesterday', direction: 'rise' }))
+      .rejects.toMatchObject({ status: 409, code: 'ALERT_LIMIT_REACHED' });
+    expect(db.price_alerts).toHaveLength(20);
+  });
+
+  test('19 alerts: one more create succeeds (boundary)', async () => {
+    const alerts = Array.from({ length: 19 }, (_, i) => ({
+      id: `a${i}`, user_id: 'u1', commodity: 'Wheat', threshold_pct: 10, basis: 'yesterday', direction: 'rise',
+    }));
+    const { db, service } = setup({ price_alerts: alerts });
+    const row = await service.createAlert('u1', { commodity: 'Onion', threshold_pct: 10, basis: 'yesterday', direction: 'rise' });
+    expect(row.commodity).toBe('Onion');
+    expect(db.price_alerts).toHaveLength(20);
+  });
+
+  test('the cap is per user: another user at 20 does not block this user', async () => {
+    const alerts = Array.from({ length: 20 }, (_, i) => ({
+      id: `a${i}`, user_id: 'u2', commodity: 'Wheat', threshold_pct: 10, basis: 'yesterday', direction: 'rise',
+    }));
+    const { db, service } = setup({ price_alerts: alerts });
+    const row = await service.createAlert('u1', { commodity: 'Onion', threshold_pct: 10, basis: 'yesterday', direction: 'rise' });
+    expect(row.commodity).toBe('Onion');
+    expect(db.price_alerts).toHaveLength(21);
+  });
+
+  test('deleteAlert deletes the caller’s own alert and 404s for another user’s alert', async () => {
+    const { db, service } = setup({
+      price_alerts: [
+        { id: 'a1', user_id: 'u1', commodity: 'Wheat', threshold_pct: 10, basis: 'yesterday', direction: 'rise' },
+        { id: 'a2', user_id: 'u2', commodity: 'Wheat', threshold_pct: 10, basis: 'yesterday', direction: 'rise' },
+      ],
+    });
+    await expect(service.deleteAlert('u1', 'a2'))
+      .rejects.toMatchObject({ status: 404, code: 'ALERT_NOT_FOUND' });
+    expect(db.price_alerts).toHaveLength(2);
+    const deleted = await service.deleteAlert('u1', 'a1');
+    expect(deleted.id).toBe('a1');
+    expect(db.price_alerts.map((a) => a.id)).toEqual(['a2']);
+    await expect(service.deleteAlert('u1', 'a1'))
+      .rejects.toMatchObject({ status: 404, code: 'ALERT_NOT_FOUND' });
+  });
 });
 
 describe('evaluateAlerts', () => {
@@ -381,6 +442,30 @@ describe('evaluateAlerts', () => {
     expect(r.fired.map((f) => f.alertId)).toEqual(['a10']);
     expect(r.fired[0]).toMatchObject({ commodity: 'Wheat', change_pct: 12, latest_price: 5600, reference_price: 5000 });
     expect(db.price_alerts.find((a) => a.id === 'a10').last_triggered_date).toBe('2026-11-12');
+  });
+  test('three alerts on one commodity issue one latest-price + one history fetch per commodity', async () => {
+    const { service } = setup({
+      mandi_prices: WHEAT,
+      price_alerts: [
+        { id: 'a10', user_id: 'u1', commodity: 'Wheat', threshold_pct: 10, basis: 'yesterday', direction: 'rise', last_triggered_date: null },
+        { id: 'a15', user_id: 'u1', commodity: 'Wheat', threshold_pct: 15, basis: 'yesterday', direction: 'rise', last_triggered_date: null },
+        { id: 'aFall', user_id: 'u1', commodity: 'Wheat', threshold_pct: 10, basis: 'yesterday', direction: 'fall', last_triggered_date: null },
+      ],
+    });
+    let mandiQueries = 0;
+    const fake = mockHolder.admin;
+    mockHolder.admin = {
+      from: (table, ...rest) => {
+        if (table === 'mandi_prices') mandiQueries += 1;
+        return fake.from(table, ...rest);
+      },
+    };
+    const r = await service.evaluateAlerts();
+    expect(r.evaluated).toBe(3);
+    expect(r.fired.map((f) => f.alertId)).toEqual(['a10']);
+    // One commodity: getLatestPrice (2 queries: latest date + rows) +
+    // getHistory (1 query) = 3, not 3 alerts x 3 queries.
+    expect(mandiQueries).toBe(3);
   });
   test('never re-fires on the same data date', async () => {
     const { service } = setup({
