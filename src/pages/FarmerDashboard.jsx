@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch, uploadImage } from '../services/escrowApi';
+import { escrowFetch, listDisputes, passportFetch, uploadImage, listTransporters, quoteShipment, createShipment } from '../services/escrowApi';
+import CropPassportCard from '../components/CropPassportCard';
 import { validateImageFile } from '../utils/fileValidation';
 
 const FarmerDashboard = () => {
@@ -21,16 +22,57 @@ const FarmerDashboard = () => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  // Disputes keyed by order id (Stage 7): best-effort — a failed read
+  // leaves the map empty and the file link still goes to /disputes.
+  const [orderDisputes, setOrderDisputes] = useState({});
+
+  useEffect(() => {
+    if (!user) return;
+    listDisputes().then((res) => {
+      const map = {};
+      (res.disputes || []).forEach((d) => { if (d.order_id) map[d.order_id] = d.id; });
+      setOrderDisputes(map);
+    }).catch(() => {});
+  }, [user]);
   const [editingProduct, setEditingProduct] = useState(null);
   const [productToDelete, setProductToDelete] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [processingOrders, setProcessingOrders] = useState({});
+
+  // Ship-with-transporter booking (Stage 6): the Ship button opens this
+  // modal instead of flipping the order straight to SHIPPED.
+  const [shipOrderId, setShipOrderId] = useState(null);
+  const [shipTransporters, setShipTransporters] = useState([]);
+  const [shipLoading, setShipLoading] = useState(false);
+  const [shipSelected, setShipSelected] = useState('');
+  const [shipQuote, setShipQuote] = useState(null);
+  const [shipQuoteLoading, setShipQuoteLoading] = useState(false);
+  const [shipWindowStart, setShipWindowStart] = useState('');
+  const [shipWindowEnd, setShipWindowEnd] = useState('');
+  const [shipError, setShipError] = useState('');
+  const [shipBooking, setShipBooking] = useState(false);
+  const [shipBookedId, setShipBookedId] = useState(null);
   const [escrowNotification, setEscrowNotification] = useState({ show: false, orderId: null, amount: 0 });
   const [showListingSuccess, setShowListingSuccess] = useState(false);
   const [listingSuccessMsg, setListingSuccessMsg] = useState("");
   const [lightbox, setLightbox] = useState({ show: false, images: [], index: 0, productName: '' });
   
+  // Crop Passport State (Stage 2): one passport per product, public only
+  // once the farmer is verified — the backend enforces both.
+  const [passports, setPassports] = useState([]);
+  const [passportStats, setPassportStats] = useState(null);
+  const [passportsLoading, setPassportsLoading] = useState(true);
+  const [passportError, setPassportError] = useState('');
+  const [showPassportForm, setShowPassportForm] = useState(false);
+  const [passportSaving, setPassportSaving] = useState(false);
+  const [passportFormError, setPassportFormError] = useState('');
+  const [passportForm, setPassportForm] = useState({
+    product_id: '', crop: '', variety: '', quantity: '', unit: 'kg',
+    harvest_date: '', quality_grade: 'ungraded',
+  });
+  const [passportPhotos, setPassportPhotos] = useState([]);
+
   // Form State
   const [formData, setFormData] = useState({
     name: '',
@@ -159,7 +201,7 @@ const FarmerDashboard = () => {
     }
   }, [userLocation, locationName]);
 
-  const tabs = ['Dashboard', 'My Products', 'Orders', 'Payment Track', 'Analytics', 'Settings'];
+  const tabs = ['Dashboard', 'My Products', 'Crop Passports', 'Orders', 'Payment Track', 'Analytics', 'Settings'];
 
   useEffect(() => {
     if (!user && !loading) {
@@ -194,7 +236,7 @@ const FarmerDashboard = () => {
                     setShowLocationModal(true);
                 }
             }
-            await Promise.all([fetchMyProducts(), fetchMyOrders()]);
+            await Promise.all([fetchMyProducts(), fetchMyOrders(), fetchMyPassports()]);
           }
         } catch (err) {
           setError('An unexpected error occurred.');
@@ -270,6 +312,86 @@ const FarmerDashboard = () => {
         console.error("Farmer Orders catch:", err);
         const { data: fallback } = await supabase.from('orders').select('*').eq('farmer_id', user.id);
         if (fallback) setOrders(fallback);
+    }
+  };
+
+  // Rates arrive as fractions (0–1); tolerate a backend that already sends a
+  // percent so a value can never render as e.g. 8500%.
+  const formatPassportRate = (rate) => (rate == null ? 'Not enough data yet' : `${Math.round(rate > 1 ? rate : rate * 100)}%`);
+
+  const fetchMyPassports = async () => {
+    setPassportsLoading(true);
+    setPassportError('');
+    try {
+        const data = await passportFetch('/mine');
+        setPassports(data.lots || []);
+        setPassportStats(data.stats ?? null);
+    } catch (err) {
+        setPassportError(err.message || 'Could not load your crop passports.');
+    } finally {
+        setPassportsLoading(false);
+    }
+  };
+
+  // Products that can still get a passport: one passport per product, so
+  // anything already in `passports` is excluded from the picker.
+  const passportableProducts = products.filter((p) => {
+    const hasPassport = passports.some((lot) => lot.product_id === p.id || lot.product_name === p.name);
+    return !hasPassport;
+  });
+
+  const handleCreatePassport = async (e) => {
+    e.preventDefault();
+    const quantity = parseFloat(passportForm.quantity);
+    if (!passportForm.product_id) {
+        setPassportFormError('Choose a product for this passport.');
+        return;
+    }
+    if (!passportForm.crop.trim()) {
+        setPassportFormError('Enter the crop name.');
+        return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+        setPassportFormError('Enter a valid quantity greater than 0.');
+        return;
+    }
+    if (!passportForm.harvest_date) {
+        setPassportFormError('Enter the harvest date.');
+        return;
+    }
+    if (passportPhotos.length > 5) {
+        setPassportFormError('Add at most 5 photos.');
+        return;
+    }
+
+    setPassportSaving(true);
+    setPassportFormError('');
+    try {
+        const photos = [];
+        for (const file of passportPhotos) {
+            photos.push(await uploadPhoto(file));
+        }
+        await passportFetch('/', {
+            method: 'POST',
+            body: {
+                product_id: passportForm.product_id,
+                crop: passportForm.crop.trim(),
+                variety: passportForm.variety.trim() || undefined,
+                quantity,
+                unit: passportForm.unit,
+                harvest_date: passportForm.harvest_date,
+                quality_grade: passportForm.quality_grade,
+                photos,
+            },
+        });
+        setPassportForm({ product_id: '', crop: '', variety: '', quantity: '', unit: 'kg', harvest_date: '', quality_grade: 'ungraded' });
+        setPassportPhotos([]);
+        setShowPassportForm(false);
+        await fetchMyPassports();
+    } catch (err) {
+        setPassportFormError(err.message || 'Could not create the passport.');
+    } finally {
+        setPassportSaving(false);
     }
   };
 
@@ -477,7 +599,31 @@ const FarmerDashboard = () => {
     setShowDeleteModal(true);
   };
 
+  // Stage 6: clicking Ship opens the transporter booking flow. The
+  // self-delivery fallback below keeps the live Stage 0 /ship-order path
+  // byte-identical, so it never breaks.
   const handleShipOrder = async (orderId) => {
+    if (!orderId) return;
+    setShipOrderId(orderId);
+    setShipSelected('');
+    setShipQuote(null);
+    setShipWindowStart('');
+    setShipWindowEnd('');
+    setShipError('');
+    setShipBookedId(null);
+    setShipLoading(true);
+    try {
+        const res = await listTransporters();
+        setShipTransporters(res.transporters || res.data || (Array.isArray(res) ? res : []));
+    } catch (err) {
+        setShipError(err.message || 'Could not load transporters.');
+        setShipTransporters([]);
+    } finally {
+        setShipLoading(false);
+    }
+  };
+
+  const handleShipWithoutTransporter = async (orderId) => {
     if (!orderId) return;
 
     setProcessingOrders(prev => ({ ...prev, [orderId]: true }));
@@ -496,6 +642,52 @@ const FarmerDashboard = () => {
         alert("⚠️ " + err.message);
     } finally {
         setProcessingOrders(prev => ({ ...prev, [orderId]: false }));
+    }
+  };
+
+  const handleGetQuote = async () => {
+    if (!shipOrderId || !shipSelected) return;
+    setShipQuoteLoading(true);
+    setShipError('');
+    try {
+        const res = await quoteShipment({ order_id: shipOrderId, transporter_id: shipSelected });
+        setShipQuote(res);
+    } catch (err) {
+        setShipError(err.message || 'Could not get a quote.');
+        setShipQuote(null);
+    } finally {
+        setShipQuoteLoading(false);
+    }
+  };
+
+  const handleBookShipment = async () => {
+    if (!shipOrderId || !shipSelected || !shipQuote) return;
+    if (!shipWindowStart || !shipWindowEnd) {
+        setShipError('Enter a delivery window (start and end).');
+        return;
+    }
+    if (new Date(shipWindowEnd) < new Date(shipWindowStart)) {
+        setShipError('The delivery window end must be on or after the start.');
+        return;
+    }
+    setShipBooking(true);
+    setShipError('');
+    try {
+        const res = await createShipment({
+            order_id: shipOrderId,
+            transporter_id: shipSelected,
+            price_paise: shipQuote.price_paise,
+            delivery_window_start: new Date(shipWindowStart).toISOString(),
+            delivery_window_end: new Date(shipWindowEnd).toISOString(),
+        });
+        const shipment = res.shipment || res;
+        setShipBookedId(shipment?.id || null);
+        setOrders(prev => prev.map(o => o.id === shipOrderId ? { ...o, status: 'SHIPPED' } : o));
+        fetchMyOrders();
+    } catch (err) {
+        setShipError(err.message || 'Could not book the shipment.');
+    } finally {
+        setShipBooking(false);
     }
   };
 
@@ -642,6 +834,98 @@ const FarmerDashboard = () => {
                 </div>
             </div>
         );
+      case 'Crop Passports':
+        return (
+            <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                    <h2 className="font-playfair text-2xl font-bold text-green-deep">Crop passports</h2>
+                    {passportableProducts.length > 0 && (
+                        <button onClick={() => setShowPassportForm(!showPassportForm)} className="bg-green-deep text-white px-6 py-2 rounded-xl font-bold">
+                            {showPassportForm ? 'Cancel' : '+ Create Passport'}
+                        </button>
+                    )}
+                </div>
+
+                <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
+                    <h3 className="font-playfair text-xl font-bold text-green-deep mb-4">Your track record</h3>
+                    {!passportStats ? (
+                        <p className="text-gray-500 font-medium">No orders yet — stats appear after your first delivery.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Deliveries</p>
+                                <p className="text-2xl font-black text-green-deep">{passportStats.deliveries ?? 0}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">On-time rate</p>
+                                <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.on_time_rate)}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
+                                <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.dispute_rate)}</p>
+                            </div>
+                        </div>
+                    )}
+                </section>
+
+                {showPassportForm && (
+                    <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
+                        <h3 className="font-playfair text-xl font-bold text-green-deep mb-6">New crop passport</h3>
+                        <form onSubmit={handleCreatePassport} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="md:col-span-2">
+                                <label className="text-xs font-bold uppercase text-gray-400">Product</label>
+                                <select required className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.product_id} onChange={e => setPassportForm({ ...passportForm, product_id: e.target.value })}>
+                                    <option value="">Select a product...</option>
+                                    {passportableProducts.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Crop</label><input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={passportForm.crop} onChange={e => setPassportForm({ ...passportForm, crop: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Variety</label><input className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Basmati..." value={passportForm.variety} onChange={e => setPassportForm({ ...passportForm, variety: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.quantity} onChange={e => setPassportForm({ ...passportForm, quantity: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Unit</label><select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.unit} onChange={e => setPassportForm({ ...passportForm, unit: e.target.value })}><option>kg</option><option>quintal</option></select></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Harvest date</label><input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.harvest_date} onChange={e => setPassportForm({ ...passportForm, harvest_date: e.target.value })} /></div>
+                            <div>
+                                <label className="text-xs font-bold uppercase text-gray-400">Quality grade</label>
+                                <select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.quality_grade} onChange={e => setPassportForm({ ...passportForm, quality_grade: e.target.value })}>
+                                    <option value="A">A</option>
+                                    <option value="B">B</option>
+                                    <option value="C">C</option>
+                                    <option value="ungraded">Ungraded</option>
+                                </select>
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="text-xs font-bold uppercase text-gray-400">Photos (up to 5)</label>
+                                <input type="file" multiple accept="image/*" className="w-full bg-cream rounded-xl p-4 mt-1" onChange={e => setPassportPhotos(Array.from(e.target.files || []).slice(0, 5))} />
+                                {passportPhotos.length > 0 && <p className="text-xs text-gray-500 mt-2">{passportPhotos.length} photo{passportPhotos.length > 1 ? 's' : ''} selected</p>}
+                            </div>
+                            {passportFormError && <p className="md:col-span-2 text-sm text-red-600">{passportFormError}</p>}
+                            <button type="submit" disabled={passportSaving} className="md:col-span-2 bg-green-fresh text-white font-black py-4 rounded-xl disabled:opacity-50">
+                                {passportSaving ? 'Creating...' : 'Create Passport'}
+                            </button>
+                        </form>
+                    </section>
+                )}
+
+                {passportsLoading ? (
+                    <p className="text-center py-10 text-gray-400 italic">Loading your passports...</p>
+                ) : passportError ? (
+                    <p className="text-center py-10 text-red-600">{passportError}</p>
+                ) : passports.length === 0 ? (
+                    <div className="py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
+                        <p className="text-gray-400 font-bold italic mb-4 text-xl">No crop passports yet.</p>
+                        <p className="text-gray-400 text-sm">Create one for a product to show buyers where their food comes from.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {passports.map((lot) => (
+                            <CropPassportCard key={lot.id || lot.product_id || lot.crop} lot={lot} />
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
       case 'Orders':
         return (
             <div className="bg-white rounded-3xl shadow-sm border border-cream-dark overflow-hidden">
@@ -735,6 +1019,15 @@ const FarmerDashboard = () => {
                                                 <span className="text-[10px] font-black text-red-400 uppercase italic">
                                                     Order Rejected
                                                 </span>
+                                            )}
+                                            {orderDisputes[order.id] ? (
+                                                <Link to={`/disputes/${orderDisputes[order.id]}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline">
+                                                    View dispute →
+                                                </Link>
+                                            ) : ['PAID', 'SHIPPED', 'DELIVERED', 'COMPLETED'].includes(order.status) && (
+                                                <Link to={`/disputes?order=${encodeURIComponent(order.id)}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline">
+                                                    File a dispute
+                                                </Link>
                                             )}
                                         </div>
                                     </td>
@@ -1106,6 +1399,14 @@ const FarmerDashboard = () => {
             </div>
             <button onClick={() => setShowAddModal(true)} className="bg-green-fresh text-white px-6 py-2.5 rounded-full text-sm font-bold shadow-lg hover:scale-105 transition-all text-center">+ List New Crop</button>
         </header>
+        {/* Verification status — real DB status only, never self-asserted */}
+        {profile?.verification_status === 'verified' ? (
+            <div className="mb-6 inline-flex items-center gap-2 bg-green-fresh/10 text-green-deep text-xs font-black px-4 py-2 rounded-full border border-green-fresh/20">✓ Verified farmer</div>
+        ) : profile?.verification_status === 'pending' ? (
+            <p className="mb-6 text-sm font-bold text-gray-500">Your verification is under review.</p>
+        ) : (
+            <p className="mb-6 text-sm font-bold text-green-deep">Get verified to build buyer trust — <Link to="/user-profile" className="underline hover:text-amber">verify your identity</Link>.</p>
+        )}
         {renderContent()}
       </main>
 
@@ -1381,6 +1682,98 @@ const FarmerDashboard = () => {
               <div className="absolute top-8 left-1/2 -translate-x-1/2 text-center pointer-events-none">
                   <h4 className="text-white font-black uppercase tracking-[0.4em] text-xs mb-1 opacity-50">Harvest Inspection</h4>
                   <p className="text-amber font-black text-2xl uppercase tracking-tighter">{lightbox.productName}</p>
+              </div>
+          </div>
+      )}
+      {/* Ship with transporter (Stage 6) — pick a verified transporter,
+          get a quote, pick a delivery window, book. Self-delivery falls
+          back to the unchanged /ship-order call. */}
+      {shipOrderId && (
+          <div className="fixed inset-0 bg-green-deep/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-2xl rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
+                  <div className="bg-green-deep p-6 text-white flex justify-between items-center">
+                      <h2 className="text-2xl font-playfair font-black">Book Delivery</h2>
+                      <button onClick={() => setShipOrderId(null)} className="text-white/40 hover:text-white text-2xl">×</button>
+                  </div>
+                  <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+                      {shipBookedId ? (
+                          <div>
+                              <p className="text-green-fresh font-black mb-4">Shipment booked — the order is marked shipped.</p>
+                              <Link to={`/shipments/${shipBookedId}/track`} className="font-bold text-green-mid hover:text-green-deep">Track shipment →</Link>
+                          </div>
+                      ) : (
+                          <>
+                              {shipLoading ? (
+                                  <p className="text-center py-10 text-gray-400 italic">Loading transporters...</p>
+                              ) : shipTransporters.length === 0 ? (
+                                  <p className="text-gray-500 font-medium py-10 text-center">No verified transporters available. Ship it yourself below.</p>
+                              ) : (
+                                  <div className="space-y-3">
+                                      <p className="text-xs font-bold uppercase text-gray-400">Pick a transporter</p>
+                                      {shipTransporters.map((t) => (
+                                          <label key={t.id} className="flex items-center gap-3 bg-cream rounded-xl p-4 cursor-pointer">
+                                              <input
+                                                  type="radio"
+                                                  name="ship-transporter"
+                                                  checked={shipSelected === t.id}
+                                                  onChange={() => { setShipSelected(t.id); setShipQuote(null); }}
+                                              />
+                                              <span className="font-bold text-green-deep">{t.vehicle_type} · {t.vehicle_number}</span>
+                                              <span className="text-sm text-gray-500">
+                                                  {(t.service_areas || []).join(', ')}
+                                                  {t.rate_paise_per_km != null ? ` · ₹${(t.rate_paise_per_km / 100).toFixed(2)}/km` : ''}
+                                                  {t.flat_rate_paise != null ? ` · ₹${(t.flat_rate_paise / 100).toFixed(2)} flat` : ''}
+                                              </span>
+                                          </label>
+                                      ))}
+                                      <button
+                                          onClick={() => void handleGetQuote()}
+                                          disabled={!shipSelected || shipQuoteLoading}
+                                          className="bg-green-deep text-white font-bold px-6 py-3 rounded-xl disabled:opacity-50"
+                                      >
+                                          {shipQuoteLoading ? 'Getting quote...' : 'Get Quote'}
+                                      </button>
+                                  </div>
+                              )}
+                              {shipQuote && (
+                                  <div className="bg-cream rounded-xl p-4">
+                                      <p className="font-black text-green-deep text-lg">₹{(Number(shipQuote.price_paise || 0) / 100).toFixed(2)} {shipQuote.currency || 'INR'}</p>
+                                      <p className="text-sm text-gray-500">
+                                          {shipQuote.distance_km != null ? `Distance: ${shipQuote.distance_km} km` : 'Flat rate — no distance quoted'}
+                                      </p>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                          <div>
+                                              <label className="text-xs font-bold uppercase text-gray-400">Delivery window start</label>
+                                              <input type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowStart} onChange={(e) => setShipWindowStart(e.target.value)} />
+                                          </div>
+                                          <div>
+                                              <label className="text-xs font-bold uppercase text-gray-400">Delivery window end</label>
+                                              <input type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowEnd} onChange={(e) => setShipWindowEnd(e.target.value)} />
+                                          </div>
+                                      </div>
+                                      <button
+                                          onClick={() => void handleBookShipment()}
+                                          disabled={shipBooking}
+                                          className="mt-4 bg-green-fresh text-white font-black py-4 px-8 rounded-xl disabled:opacity-50"
+                                      >
+                                          {shipBooking ? 'Booking...' : 'Book Shipment'}
+                                      </button>
+                                  </div>
+                              )}
+                              {shipError && <p className="text-sm text-red-600">{shipError}</p>}
+                              <div className="border-t border-cream-dark pt-4">
+                                  <p className="text-sm text-gray-500 mb-3">Delivering it yourself instead?</p>
+                                  <button
+                                      onClick={() => { void handleShipWithoutTransporter(shipOrderId); setShipOrderId(null); }}
+                                      disabled={processingOrders[shipOrderId]}
+                                      className="bg-white border-2 border-green-deep/10 text-green-deep font-bold px-6 py-3 rounded-xl disabled:opacity-50"
+                                  >
+                                      {processingOrders[shipOrderId] ? 'Shipping...' : 'Ship Without Transporter'}
+                                  </button>
+                              </div>
+                          </>
+                      )}
+                  </div>
               </div>
           </div>
       )}
