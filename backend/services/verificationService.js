@@ -144,6 +144,18 @@ async function approveVerification(adminId, submissionId) {
     .update({ verification_status: 'verified', verified_at: now, verified_by: adminId })
     .eq('id', submission.farmer_id);
   if (profileError) throw profileError;
+  // Stage 6: approving a transporter submission also verifies the
+  // transporters row for that user (no second admin queue). No row
+  // exists for a farmer approval — the update then matches nothing.
+  const { data: transporterRows, error: transporterError } = await supabaseAdmin
+    .from('transporters')
+    .update({ verification_status: 'verified' })
+    .eq('user_id', submission.farmer_id)
+    .select('id');
+  if (transporterError) throw transporterError;
+  if (transporterRows && transporterRows.length > 0) {
+    await logAudit(adminId, 'transporter.approved', { submission_id: submission.id, user_id: submission.farmer_id });
+  }
   await logAudit(adminId, 'verification.approved', { submission_id: submission.id, farmer_id: submission.farmer_id });
   return getSingle(updated);
 }
@@ -168,6 +180,17 @@ async function rejectVerification(adminId, submissionId, note) {
     .update({ verification_status: 'rejected' })
     .eq('id', submission.farmer_id);
   if (profileError) throw profileError;
+  // Stage 6: rejecting a transporter submission also rejects the
+  // transporters row for that user (no second admin queue).
+  const { data: transporterRows, error: transporterError } = await supabaseAdmin
+    .from('transporters')
+    .update({ verification_status: 'rejected' })
+    .eq('user_id', submission.farmer_id)
+    .select('id');
+  if (transporterError) throw transporterError;
+  if (transporterRows && transporterRows.length > 0) {
+    await logAudit(adminId, 'transporter.rejected', { submission_id: submission.id, user_id: submission.farmer_id });
+  }
   await logAudit(adminId, 'verification.rejected', { submission_id: submission.id, farmer_id: submission.farmer_id });
   return getSingle(updated);
 }

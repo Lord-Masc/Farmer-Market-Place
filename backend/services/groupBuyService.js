@@ -228,7 +228,7 @@ async function getGroupDetail(callerId, groupId) {
       created_at: p.created_at,
     })),
     total_quantity: pooledTotal(participants),
-    transport: getTransportBooking(group),
+    transport: await getTransportBooking(group),
   };
 }
 
