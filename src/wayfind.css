@@ -1,0 +1,99 @@
+/* Hallmark · theme: wayfind · genre: modern-minimal · dealt: 2/3 · seed: farmer-marketplace-farmer-first-agricultural-9c6d·84890325·2026-11-12·r0 · states: 8 · contrast: pass · v2.0.0 */
+/* critique (pre-emit, honest): P4 H4 E4 S4 R4 V3 — weakest V: first Wayfind application on this product, no prior run to differ from; the differentiator is the material itself (departure-board tables, station-sequence tracking). */
+/* Hallmark · waive 64 · the dealt Wayfind theme specifies mono throughout · mono is the material here, per the theme reference */
+/* scope: new-flow pages/components only (docs/ai/STAGE11_THEMES.md §2). look-only theme: no copy, behaviour, route, api, or data changes. apply by adding the `wayfind` class to a page <main> (or the VerificationQueue root / NotificationBell root). */
+/* gates noted: 67 labels untracked + sentence-case via CSS (no copy change); 63 pre-existing "→" link copy left as-is (look-only, not a rewrite); 4 inner rows render as hairline wells, not 2px cards; 10a transition-all overridden to border/background steps(1); 48/7a/2a token-only, no literal colours/fonts/gradients; 27 reduced-motion stops the spinner; 26a scoped cobalt focus; 34/62 pre-existing global, out of scope. */
+/* devanagari: chivo mono has no devanagari subset (verified via google fonts css2 api — latin/latin-ext/vietnamese only; noto sans mono also lacks one), so the stack in tokens.css is "chivo mono", "noto sans devanagari", ui-monospace, monospace. latin/digits stay mono; hindi falls back to noto sans devanagari (proportional, correct shaping). */
+/* all values via var(--...) tokens only. unlayered author css beats tailwind's layered utilities; every rule is prefixed .wayfind (0,2,0). */
+
+/* scope root: paper ground, ink text, mono material, tabular figures */
+.wayfind { background-color: var(--color-paper); color: var(--color-ink); font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+
+/* type: display 800, labels 500, body 400; sentence case, untracked */
+.wayfind h1, .wayfind h2, .wayfind h3, .wayfind .font-playfair, .wayfind .font-dmsans { font-family: var(--font-display); text-wrap: balance; }
+.wayfind h1, .wayfind h2, .wayfind h3, .wayfind .font-black { font-weight: 800; }
+.wayfind .font-bold, .wayfind .font-semibold { font-weight: 500; }
+.wayfind .font-medium { font-weight: 400; }
+.wayfind .uppercase { text-transform: none; letter-spacing: 0; }
+.wayfind .tracking-widest, .wayfind .tracking-wider, .wayfind .tracking-wide { letter-spacing: 0; }
+
+/* text colours: greens collapse to ink, greys to muted, red text to the error token */
+.wayfind .text-green-deep, .wayfind .text-green-mid, .wayfind .text-green-fresh, .wayfind .text-green-700 { color: var(--color-ink); }
+.wayfind .text-gray-500, .wayfind .text-gray-600 { color: var(--color-muted); }
+.wayfind [class~="text-[#4a4a4a]"] { color: var(--color-ink); }
+.wayfind .text-white { color: var(--color-paper-3); }
+.wayfind .text-red-500, .wayfind .text-red-600 { color: var(--color-error); }
+/* text-red-300 on the dark "ready to close" panel intentionally left as-is. */
+.wayfind a.text-green-mid, .wayfind a.text-green-deep, .wayfind .text-amber { color: var(--color-ink); text-decoration: underline; }
+.wayfind a:hover { color: var(--color-accent); }
+.wayfind .hover\:text-amber:hover { color: var(--color-accent); }
+
+/* surfaces: 2px ink borders, square corners, no shadows. depth is borders. */
+.wayfind .bg-white:not(.rounded-full), .wayfind .bg-cream:not(.rounded-full) { background-color: var(--color-paper-3); border: 2px solid var(--color-ink); border-radius: 0; box-shadow: none; }
+.wayfind .bg-cream.rounded-full { background-color: var(--color-paper-2); color: var(--color-muted); }
+/* hairline wells (gate 4): inner rows, not cards */
+.wayfind [class~="bg-cream/30"], .wayfind [class~="bg-cream/50"] { background-color: var(--color-paper-2); border: 1px solid var(--color-rule); border-radius: 0; box-shadow: none; }
+.wayfind .bg-cream-dark { background-color: var(--color-paper-2); }
+.wayfind .hover\:border-green-fresh:hover { border-color: var(--color-ink); }
+.wayfind .hover\:bg-amber\/10:hover { background-color: var(--color-paper-2); }
+
+/* dark surfaces: generic green-deep becomes an ink plate; buttons + active filters become cobalt (live) */
+.wayfind .bg-green-deep { background-color: var(--color-ink); color: var(--color-paper-3); border: 2px solid var(--color-ink); border-radius: 0; box-shadow: none; }
+.wayfind button.bg-green-deep, .wayfind a.bg-green-deep, .wayfind .bg-green-deep.shadow-lg { background-color: var(--color-accent); color: var(--color-accent-ink); border: 2px solid var(--color-accent); }
+
+/* live green: progress fill is cobalt; solid green (stepper done) is ink */
+.wayfind .h-2 { border-radius: 0; }
+.wayfind .bg-green-fresh.h-2 { background-color: var(--color-accent); }
+.wayfind .bg-green-fresh { background-color: var(--color-ink); color: var(--color-paper-3); border-radius: 0; box-shadow: none; }
+
+/* status pills: generic pill is paper with an ink border; the verified pill is ink-filled */
+.wayfind [class~="bg-green-fresh/10"] { background-color: var(--color-paper-3); color: var(--color-ink); border: 2px solid var(--color-ink); }
+.wayfind [class~="bg-green-fresh/10"].text-xs { background-color: var(--color-ink); color: var(--color-paper-3); }
+/* red pills (overdue / failed delivery) are ink-filled; destructive buttons are ink-outlined */
+.wayfind .bg-red-500 { background-color: var(--color-paper-3); color: var(--color-ink); border: 2px solid var(--color-ink); border-radius: 0; box-shadow: none; }
+.wayfind .bg-red-500.rounded-full { background-color: var(--color-ink); color: var(--color-paper-3); border: 2px solid var(--color-ink); }
+/* unread bell badge is the one live red: cobalt, round, structural */
+.wayfind .bg-red-500.absolute { background-color: var(--color-accent); color: var(--color-accent-ink); border: none; border-radius: 999px; }
+
+/* amber: live-status pills are amber fill + ink text, on ink only as figures; decorative amber becomes paper-2 + ink */
+.wayfind .bg-amber { background-color: var(--color-accent-2); color: var(--color-ink); border: 2px solid var(--color-ink); }
+.wayfind [class~="bg-amber/10"] { background-color: var(--color-paper-2); border: 2px solid var(--color-ink); color: var(--color-ink); }
+.wayfind [class~="border-amber/40"] { border-color: var(--color-ink); }
+.wayfind .text-amber-700 { color: var(--color-ink); }
+
+/* inputs: paper, 2px ink border, square; cobalt focus */
+.wayfind input, .wayfind select, .wayfind textarea { background-color: var(--color-paper-3); border: 2px solid var(--color-ink); border-radius: 0; color: var(--color-ink); font-family: var(--font-display); }
+.wayfind input::placeholder, .wayfind textarea::placeholder { color: var(--color-muted); }
+.wayfind input:focus, .wayfind select:focus, .wayfind textarea:focus { border-color: var(--color-focus); outline: none; }
+
+/* tables: departure-board rules — 2px ink under the head, hairlines between rows */
+.wayfind table { border-collapse: collapse; }
+.wayfind thead { border-bottom: 2px solid var(--color-ink); }
+.wayfind th { font-weight: 500; color: var(--color-muted); text-transform: none; letter-spacing: 0; text-align: left; }
+.wayfind td, .wayfind th { border-bottom: 1px solid var(--color-rule); }
+
+/* otp figure: amber on ink — the only text-3xl in scope with letter-spaced digits */
+.wayfind [class~="text-3xl"][class~="tracking-[0.3em]"] { color: var(--color-accent-2); }
+
+/* rounding: square everything except pills (999px) and structural circles; chat bubbles keep theirs (meaning-adjacent) */
+.wayfind [class~="rounded-[24px]"], .wayfind [class~="rounded-[32px]"], .wayfind [class~="rounded-[28px]"], .wayfind [class~="rounded-[48px]"], .wayfind [class~="rounded-[20px]"], .wayfind .rounded-2xl, .wayfind .rounded-xl, .wayfind .rounded-lg, .wayfind .rounded-md { border-radius: 0; }
+.wayfind [class~="max-w-[80%]"].rounded-2xl, .wayfind [class~="max-w-[90%]"].rounded-2xl { border-radius: 1rem; }
+
+/* empty states keep their dashed meaning, squared + ink-ruled */
+.wayfind .border-dashed { border-radius: 0; border-width: 2px; border-color: var(--color-ink-rule); border-style: dashed; }
+
+/* shadows: none — depth is borders */
+.wayfind .shadow-sm, .wayfind .shadow, .wayfind .shadow-md, .wayfind .shadow-lg, .wayfind .shadow-xl, .wayfind .shadow-inner { box-shadow: none; }
+
+/* motion: no `transition: all` (gate 10a); spinner keeps spinning, ink instead of green */
+.wayfind .transition-all { transition-property: border-color, background-color; transition-timing-function: steps(1); transition-duration: var(--dur-micro); }
+.wayfind .animate-spin { border-color: var(--color-ink); border-top-color: transparent; }
+
+/* images: square, 2px ink frame */
+.wayfind img { border-radius: 0; border: 2px solid var(--color-ink); }
+
+/* focus + selection + press feedback (all eight states: hover/focus/active covered here; disabled/loading/empty/error are the app's own) */
+.wayfind :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.wayfind button:active, .wayfind a:active { transform: translateY(1px); }
+.wayfind ::selection { background-color: var(--color-accent-2); color: var(--color-ink); }
+@media (prefers-reduced-motion: reduce) { .wayfind .animate-spin { animation: none; } }

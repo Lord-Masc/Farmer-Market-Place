@@ -126,14 +126,14 @@ const VerificationQueue = () => {
 
     if (forbidden) {
         return (
-            <div className="min-h-screen bg-cream font-dmsans p-6 md:p-12 flex items-center justify-center">
+            <div className="wayfind min-h-screen bg-cream font-dmsans p-6 md:p-12 flex items-center justify-center">
                 <p className="text-xl font-black text-green-deep">You don't have access to this page.</p>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-cream font-dmsans p-6 md:p-12">
+        <div className="wayfind min-h-screen bg-cream font-dmsans p-6 md:p-12">
             <div className="max-w-6xl mx-auto">
                 <Link to="/" className="inline-flex items-center gap-2 text-green-deep font-black mb-10 hover:text-amber transition-colors">
                     ← Back to Home

@@ -457,6 +457,22 @@ describe('disputeService.resolveDispute', () => {
     expect(db.payments.find((p) => p.id === 'pay1').status).toBe('REFUNDED');
   });
 
+  test('partial refund then a full-refund resolve -> 409 REFUND_ALREADY_EXISTS, order stays PAID, payment stays HELD', async () => {
+    const d1 = await service.fileDispute('buyer1', { order_id: 'order2', category: 'quantity', description: 'short' });
+    await service.resolveDispute('admin1', d1.id, { outcome: 'partial_refund', amount_paise: 20000, note: 'Short by 40%.' });
+    expect(db.orders.find((o) => o.id === 'order2').status).toBe('PAID');
+    expect(db.payments.find((p) => p.id === 'pay2').status).toBe('HELD');
+    const d2 = await service.fileDispute('buyer1', { order_id: 'order2', category: 'quantity', description: 'still short' });
+    await expect(service.resolveDispute('admin1', d2.id, { outcome: 'refund', note: 'Full refund.' }))
+      .rejects.toMatchObject({ status: 409, code: 'REFUND_ALREADY_EXISTS' });
+    expect(db.orders.find((o) => o.id === 'order2').status).toBe('PAID');
+    expect(db.payments.find((p) => p.id === 'pay2').status).toBe('HELD');
+    // No gateway call for the remainder — only the partial refund went out.
+    expect(mockHolder.razorpay.payments.refund).toHaveBeenCalledTimes(1);
+    expect(db.refunds).toHaveLength(1);
+    expect(db.refunds[0]).toMatchObject({ order_id: 'order2', amount: 200 });
+  });
+
   test('second resolve attempt -> 409 AND still exactly one refund row / gateway call', async () => {
     const d = await service.fileDispute('buyer1', { order_id: 'order1', category: 'quality', description: 'damp' });
     await service.resolveDispute('admin1', d.id, { outcome: 'refund', note: 'Full refund.' });
@@ -570,6 +586,28 @@ describe('disputeService SLA + stats', () => {
     expect(db.disputes.find((r) => r.id === d2.id).escalated).toBe(false);
   });
 
+  test('one dispute: resolution_rate and avg_resolution_hours are null (small-N), counts stay exact', async () => {
+    const d1 = await service.fileDispute('buyer1', { order_id: 'order1', category: 'quality', description: 'a' });
+    db.disputes.find((r) => r.id === d1.id).created_at = '2026-11-05T10:00:00.000Z';
+    await service.resolveDispute('admin1', d1.id, { outcome: 'rejected', note: 'No fault.' });
+    db.disputes.find((r) => r.id === d1.id).resolved_at = '2026-11-06T10:00:00.000Z';
+    const stats = await service.getDisputeStats();
+    expect(stats).toEqual({ total: 1, open: 0, resolved: 1, resolution_rate: null, avg_resolution_hours: null });
+  });
+
+  test('five disputes: rate and average are real (1 of 5 resolved in 24h)', async () => {
+    const d1 = await service.fileDispute('buyer1', { order_id: 'order1', category: 'quality', description: 'a' });
+    await service.fileDispute('buyer1', { order_id: 'order2', category: 'quantity', description: 'b' });
+    await service.fileDispute('buyer1', { order_id: 'order3', category: 'non_delivery', description: 'c' });
+    await service.fileDispute('buyer1', { order_id: 'order4', category: 'quality', description: 'd' });
+    await service.fileDispute('buyer1', { order_id: 'order5', category: 'quality', description: 'e' });
+    db.disputes.find((r) => r.id === d1.id).created_at = '2026-11-05T10:00:00.000Z';
+    await service.resolveDispute('admin1', d1.id, { outcome: 'rejected', note: 'No fault.' });
+    db.disputes.find((r) => r.id === d1.id).resolved_at = '2026-11-06T10:00:00.000Z';
+    const stats = await service.getDisputeStats();
+    expect(stats).toEqual({ total: 5, open: 4, resolved: 1, resolution_rate: 0.2, avg_resolution_hours: 24 });
+  });
+
   test('stats from real disputes only; NULL rates when there is nothing to compute', async () => {
     const empty = await service.getDisputeStats();
     expect(empty).toEqual({ total: 0, open: 0, resolved: 0, resolution_rate: null, avg_resolution_hours: null });
@@ -580,7 +618,9 @@ describe('disputeService SLA + stats', () => {
     await service.resolveDispute('admin1', d1.id, { outcome: 'rejected', note: 'No fault.' });
     db.disputes.find((r) => r.id === d1.id).resolved_at = '2026-11-06T10:00:00.000Z';
     const stats = await service.getDisputeStats();
-    expect(stats).toEqual({ total: 2, open: 1, resolved: 1, resolution_rate: 0.5, avg_resolution_hours: 24 });
+    // Two disputes is below the small-N threshold (5): the rate and the
+    // average are null even though the 24h resolution is pinned above.
+    expect(stats).toEqual({ total: 2, open: 1, resolved: 1, resolution_rate: null, avg_resolution_hours: null });
   });
 });
 
@@ -710,6 +750,6 @@ describe('disputeRoutes', () => {
     const next = jest.fn();
     await handler({ user: { id: 'buyer1' }, query: {} }, res, next);
     expect(next).not.toHaveBeenCalled();
-    expect(res.json).toHaveBeenCalledWith({ total: 1, open: 1, resolved: 0, resolution_rate: 0, avg_resolution_hours: null });
+    expect(res.json).toHaveBeenCalledWith({ total: 1, open: 1, resolved: 0, resolution_rate: null, avg_resolution_hours: null });
   });
 });

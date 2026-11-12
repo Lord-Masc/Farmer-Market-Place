@@ -51,9 +51,15 @@ jest.mock('../services/moderationService', () => ({
   reinstateUser: jest.fn(),
   lookupUser: jest.fn(),
 }));
+jest.mock('../services/fairPriceService', () => ({
+  listCostParams: jest.fn(),
+  createCostParams: jest.fn(),
+  updateCostParams: jest.fn(),
+}));
 
 const adminMetricsService = require('../services/adminMetricsService');
 const moderationService = require('../services/moderationService');
+const fairPriceService = require('../services/fairPriceService');
 const { AppError } = require('../utils/errors');
 // Routers are required ONCE at the top (no jest.resetModules in this
 // file): the mocked services above are the same instances the routers
@@ -131,8 +137,9 @@ describe('admin router', () => {
     routes = adminRoutes;
   });
 
-  test('the router exposes exactly the Stage 1 routes plus the Stage 10 routes', () => {
+  test('the router exposes exactly the Stage 1 routes plus the Stage 10 routes plus the Stage 3 cost-params routes', () => {
     expect(routeList(routes)).toEqual([
+      'GET /cost-params',
       'GET /metrics',
       'GET /reconciliation',
       'GET /roles',
@@ -144,6 +151,8 @@ describe('admin router', () => {
       'POST /roles/:userId',
       'POST /verifications/:id/approve',
       'POST /verifications/:id/reject',
+      'POST /cost-params',
+      'PATCH /cost-params/:id',
     ].sort());
   });
 
@@ -247,6 +256,48 @@ describe('admin router', () => {
       user: { id: 'admin1' }, params: { query: 'nobody@test' },
     });
     expect(err).toMatchObject({ status: 404, code: 'USER_NOT_FOUND' });
+  });
+
+  // Stage 3 cost parameters (module B): the net-earnings assumptions.
+  // The router's job is passing the admin id + body through; the
+  // versioning lives in the service (see fairPriceService.test.js).
+  test('GET /cost-params returns { params }', async () => {
+    const params = [{ id: 'c1', version: 1, is_current: true, transport_paise_per_quintal: 5000 }];
+    fairPriceService.listCostParams.mockResolvedValue(params);
+    const { jsonArgs, err } = await runHandler(routes, 'GET', '/cost-params', { user: { id: 'admin1' } });
+    expect(err).toBeNull();
+    expect(jsonArgs[0]).toEqual({ params });
+  });
+
+  test('POST /cost-params creates with the admin id and answers 201', async () => {
+    const param = { id: 'c1', version: 1, is_current: true };
+    fairPriceService.createCostParams.mockResolvedValue(param);
+    const body = { transport_paise_per_quintal: 5000, commission_pct: 2, packaging_paise_per_quintal: 2000, platform_fee_paise_per_quintal: 1000, wastage_pct: 5 };
+    const { res, jsonArgs, err } = await runHandler(routes, 'POST', '/cost-params', { user: { id: 'admin1' }, body });
+    expect(err).toBeNull();
+    expect(res.statusCode).toBe(201);
+    expect(fairPriceService.createCostParams).toHaveBeenCalledWith('admin1', body);
+    expect(jsonArgs[0]).toEqual({ param });
+  });
+
+  test('PATCH /cost-params/:id versions with the admin id and body', async () => {
+    const param = { id: 'c2', version: 2, is_current: true };
+    fairPriceService.updateCostParams.mockResolvedValue(param);
+    const body = { commission_pct: 3 };
+    const { jsonArgs, err } = await runHandler(routes, 'PATCH', '/cost-params/:id', {
+      user: { id: 'admin1' }, params: { id: 'c1' }, body,
+    });
+    expect(err).toBeNull();
+    expect(fairPriceService.updateCostParams).toHaveBeenCalledWith('c1', 'admin1', body);
+    expect(jsonArgs[0]).toEqual({ param });
+  });
+
+  test('POST /cost-params passes a 409 (scope already exists) to next()', async () => {
+    fairPriceService.createCostParams.mockRejectedValue(new AppError(409, 'COST_PARAMS_EXIST', 'Cost parameters already exist for this scope.'));
+    const { err } = await runHandler(routes, 'POST', '/cost-params', {
+      user: { id: 'admin1' }, body: { transport_paise_per_quintal: 5000 },
+    });
+    expect(err).toMatchObject({ status: 409, code: 'COST_PARAMS_EXIST' });
   });
 });
 

@@ -50,9 +50,12 @@ const {
   refundOrder,
   refundPartialOrder,
   createMarketplaceOrder,
+  findPartialRefundRow,
+  partialRefundError,
 } = require('./escrowService');
 
 const DISPUTE_SLA_DAYS = 7;
+const MIN_POPULATION = 5;
 const EVIDENCE_BUCKET = 'dispute-evidence';
 const SIGNED_URL_TTL_SECONDS = 300;
 const DISPUTE_CATEGORIES = ['quality', 'quantity', 'non_delivery', 'payment'];
@@ -410,6 +413,11 @@ async function resolveDispute(adminId, disputeId, { outcome, amount_paise, note 
   let replacementOrderId = null;
   try {
     if (outcome === 'refund') {
+      // A completed partial refund blocks the full path BEFORE the order
+      // leaves PAID: the remainder is gateway-only, so the order stays
+      // PAID and the payment stays HELD.
+      const partial = await findPartialRefundRow(order.id, totalPaise);
+      if (partial) throw partialRefundError();
       // Enqueue through the Stage 0 path, then run the idempotent refund.
       await markRefundPending(order.id);
       const res = await refundOrder(order.id);
@@ -469,7 +477,9 @@ async function resolveDispute(adminId, disputeId, { outcome, amount_paise, note 
 }
 
 // GET /api/disputes/stats — public aggregates from real disputes only.
-// Rates are NULL when there is nothing to compute (never 0-by-invention).
+// Rates are NULL when there is nothing to compute (never 0-by-invention),
+// and NULL while fewer than MIN_POPULATION disputes exist: at N=1 the
+// rate and the average duration ARE one dispute's exact outcome.
 async function getDisputeStats() {
   const { data, error } = await supabaseAdmin.from('disputes').select('*');
   if (error) throw error;
@@ -482,8 +492,8 @@ async function getDisputeStats() {
     total: rows.length,
     open: rows.length - resolved.length,
     resolved: resolved.length,
-    resolution_rate: rows.length === 0 ? null : resolved.length / rows.length,
-    avg_resolution_hours: hours.length === 0
+    resolution_rate: rows.length < MIN_POPULATION ? null : resolved.length / rows.length,
+    avg_resolution_hours: rows.length < MIN_POPULATION || hours.length === 0
       ? null
       : Math.round((hours.reduce((a, b) => a + b, 0) / hours.length) * 100) / 100,
   };

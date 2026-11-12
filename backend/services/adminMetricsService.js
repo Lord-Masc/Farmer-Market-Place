@@ -16,14 +16,11 @@
 // groups_total, notification buckets) are 0 when the table is empty —
 // zero rows IS a real measurement for a count.
 //
-// MANDI COMPARISON NEEDS STAGE 3: the mandi_prices table does NOT exist
-// (Stage 3 is blocked on the data.gov.in API key). The read below is
-// GUARDED (same isTableMissing pattern as the Stage 8 price tool): a
-// missing table returns null, never an invented number. When Stage 3
-// lands, this lights up with no other change — EXCEPT the row shape:
-// the modal is read from mandi_prices.price, assumed to be RUPEES per
-// unit (the Stage 8 assumption: price x 100 = paise). If Stage 3's
-// price column turns out to be paise already, drop the x 100 here.
+// MANDI COMPARISON (Stage 3, landed): the mandi_prices table holds the
+// canonical shape — modal_price is RUPEES per quintal, so modal x 100 =
+// paise. The read below is GUARDED (same isTableMissing pattern as the
+// Stage 8 price tool): a missing table returns null, never an invented
+// number.
 //
 // Reconciliation reads the admin_stuck_money view (migration
 // 20261125_admin_views.sql). The live metrics below compute from the
@@ -34,6 +31,12 @@ const supabaseAdmin = require('../utils/supabaseAdmin');
 const CAPTURED_PAYMENT_STATUSES = ['HELD', 'RELEASED'];
 const KNOWN_STUCK_CATEGORIES = ['confirmed_unpaid', 'completed_held', 'refund_reconcile'];
 const DELIVERED_STATUSES = ['DELIVERED', 'COMPLETED'];
+
+// Small-N suppression (audit finding 8): on the PUBLIC path an exact
+// amount or rate computed from fewer than MIN_POPULATION underlying
+// rows leaks a single order's private value, so it is null instead.
+// The admin path (no flag) always returns the exact values.
+const MIN_POPULATION = 5;
 
 // Same table-missing detector as the Stage 8 price tool: PostgREST
 // 42P01 / PGRST205, or a "does not exist" message.
@@ -66,12 +69,12 @@ async function fetchAll(table, columns) {
 // no rows, or no finite prices. Ties keep the first most-frequent price.
 async function getMandiModalPaise() {
   try {
-    const { data, error } = await supabaseAdmin.from('mandi_prices').select('price');
+    const { data, error } = await supabaseAdmin.from('mandi_prices').select('modal_price');
     if (error) {
       if (isTableMissing(error)) return null;
       throw error;
     }
-    const prices = (data || []).map((r) => Number(r.price)).filter(Number.isFinite);
+    const prices = (data || []).map((r) => Number(r.modal_price)).filter(Number.isFinite);
     if (prices.length === 0) return null;
     const counts = new Map();
     for (const p of prices) counts.set(p, (counts.get(p) || 0) + 1);
@@ -87,7 +90,7 @@ async function getMandiModalPaise() {
   }
 }
 
-async function getPlatformMetrics() {
+async function getPlatformMetrics({ suppressSmallN = false } = {}) {
   const [orders, payments, groups, participants, notifications, disputes] = await Promise.all([
     fetchAll('orders', 'id,total_price,quantity,status,created_at,completed_at,delivery_deadline'),
     fetchAll('payments', 'order_id,status'),
@@ -108,7 +111,9 @@ async function getPlatformMetrics() {
     .map((d) => (new Date(d.resolved_at).getTime() - new Date(d.created_at).getTime()) / 3600000);
   const avgResolutionHours = resolutionHours.length === 0
     ? null
-    : Math.round((resolutionHours.reduce((a, b) => a + b, 0) / resolutionHours.length) * 100) / 100;
+    : (suppressSmallN && resolutionHours.length < MIN_POPULATION
+      ? null
+      : Math.round((resolutionHours.reduce((a, b) => a + b, 0) / resolutionHours.length) * 100) / 100);
   const mandiModalPaise = await getMandiModalPaise();
 
   const paidOrderIds = new Set(
@@ -120,7 +125,9 @@ async function getPlatformMetrics() {
 
   const gmvPaise = paidOrders.length === 0
     ? null
-    : paidOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0);
+    : (suppressSmallN && paidOrders.length < MIN_POPULATION
+      ? null
+      : paidOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0));
   const realisations = paidOrders
     .map((o) => {
       const qty = Number(o.quantity);
@@ -128,15 +135,22 @@ async function getPlatformMetrics() {
       return Math.round((Number(o.total_price) * 100) / qty);
     })
     .filter((v) => v !== null);
+  const medianRealisation = suppressSmallN && paidOrders.length < MIN_POPULATION
+    ? null
+    : median(realisations);
 
-  const disputeRate = orders.length === 0 ? null : round4(disputeCount / orders.length);
+  const disputeRate = orders.length === 0
+    ? null
+    : (suppressSmallN && orders.length < MIN_POPULATION ? null : round4(disputeCount / orders.length));
 
   const eligible = orders.filter(
     (o) => DELIVERED_STATUSES.includes(o.status) && o.delivery_deadline && o.completed_at,
   );
   const onTimeRate = eligible.length === 0
     ? null
-    : round4(eligible.filter((o) => new Date(o.completed_at) <= new Date(o.delivery_deadline)).length / eligible.length);
+    : (suppressSmallN && eligible.length < MIN_POPULATION
+      ? null
+      : round4(eligible.filter((o) => new Date(o.completed_at) <= new Date(o.delivery_deadline)).length / eligible.length));
 
   const closedGroups = groups.filter((g) => g.status === 'closed');
   const closedIds = new Set(closedGroups.map((g) => g.id));
@@ -149,7 +163,9 @@ async function getPlatformMetrics() {
     .filter(Boolean);
   const pooledGmvPaise = linkedOrders.length === 0
     ? null
-    : linkedOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0);
+    : (suppressSmallN && linkedOrders.length < MIN_POPULATION
+      ? null
+      : linkedOrders.reduce((sum, o) => sum + Math.round(Number(o.total_price) * 100), 0));
 
   const notificationDelivery = { sent: 0, failed: 0, deferred: 0, pending: 0 };
   for (const n of notifications) {
@@ -161,7 +177,7 @@ async function getPlatformMetrics() {
   return {
     total_orders: orders.length,
     gmv_paise: gmvPaise,
-    median_realisation_paise: median(realisations),
+    median_realisation_paise: medianRealisation,
     mandi_modal_paise: mandiModalPaise,
     dispute_rate: disputeRate,
     dispute_count: disputeCount,

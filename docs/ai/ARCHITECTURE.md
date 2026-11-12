@@ -36,8 +36,9 @@ This file is intentionally high-level. Update it only after inspecting relevant 
   `total_price`×100 over orders with a captured HELD/RELEASED payment;
   median realisation; dispute rate + avg resolution; on-time rate;
   group-selling; notification delivery; `mandi_modal_paise` GUARDED —
-  null until Stage 3 lands, never invented; null — never 0 — when no
-  data) and `backend/services/moderationService.js` (`suspendUser` /
+  wired to Stage 3 (live shape: `modal_price` in rupees per quintal,
+  ×100 → paise); null when no data, never invented; null — never 0 —
+  when no data) and `backend/services/moderationService.js` (`suspendUser` /
   `reinstateUser` / `lookupUser`; suspend sets `suspended_at` + hides all
   products, reinstate clears + restores; both audit-logged).
 - **Enforcement:** `requireAuth` rejects suspended accounts with 403
@@ -51,7 +52,7 @@ This file is intentionally high-level. Update it only after inspecting relevant 
   `/admin/verifications`.
 - **Known limits (see HANDOVER.md flags):** suspend/reinstate are two
   writes, not one transaction; median realisation mixes kg/quintal units;
-  `mandi_modal_paise` assumes Stage 3's price is rupees/unit (×100).
+  `mandi_modal_paise` reads Stage 3's `modal_price` in rupees per quintal (×100 → paise, confirmed by the landed schema).
 
 ## PWA layer (Stage 11 — NOT PRESENT, UNVERIFIED)
 

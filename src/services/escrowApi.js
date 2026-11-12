@@ -123,6 +123,54 @@ export async function transparencyFetch() {
   return data;
 }
 
+// FairPrice (Stage 3, module B) — public mandi prices, no session
+// required. Prices change at most twice a day (sync 11:00 + 20:30
+// IST), so a 5-minute in-memory cache keeps a product grid with many
+// cards of the same crop to one request per crop.
+const fairPriceCache = new Map();
+const FAIR_PRICE_TTL_MS = 5 * 60 * 1000;
+
+async function fairPriceGet(path) {
+  const url = `${ESCROW_API_URL}${path}`;
+  const hit = fairPriceCache.get(url);
+  if (hit && Date.now() - hit.at < FAIR_PRICE_TTL_MS) return hit.data;
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const error = new Error(data.error || data.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+  fairPriceCache.set(url, { at: Date.now(), data });
+  return data;
+}
+
+// Latest mandi price for a commodity (+ nearby mandis, change vs
+// yesterday, 7-day average), or { no_data: true } — never a number.
+export async function fairPriceFetch(commodity, { state, mandi } = {}) {
+  const params = new URLSearchParams();
+  if (state) params.set('state', state);
+  if (mandi) params.set('mandi', mandi);
+  const qs = params.toString();
+  return fairPriceGet(`/api/fairprice/${encodeURIComponent(commodity)}${qs ? `?${qs}` : ''}`);
+}
+
+// Net earnings for a quantity of a commodity: mandi modal minus the
+// itemised platform estimates. quantity is in quintals unless
+// unit=kg. { no_data: true } with no mandi price; { no_params: true }
+// when no admin has set the cost parameters yet.
+export async function fairPriceNetEarningsFetch(commodity, { quantity, unit = 'quintal', state, mandi } = {}) {
+  const params = new URLSearchParams({ quantity: String(quantity), unit });
+  if (state) params.set('state', state);
+  if (mandi) params.set('mandi', mandi);
+  return fairPriceGet(`/api/fairprice/${encodeURIComponent(commodity)}/net-earnings?${params.toString()}`);
+}
+
+// Current cost parameters (public read; writes stay admin-only).
+export async function fairPriceCostParamsFetch() {
+  return fairPriceGet('/api/fairprice/cost-params');
+}
+
 // Public passport reads (/api/farmers/:id/passport, /api/products/:id/passport).
 // No session required: anyone may view a verified farmer's passport. Throws
 // the backend's message on failure; the HTTP status is attached to the

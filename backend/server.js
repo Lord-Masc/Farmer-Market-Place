@@ -15,10 +15,12 @@ const disputeRoutes = require('./routes/disputeRoutes');
 const assistantRoutes = require('./routes/assistantRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const transparencyRoutes = require('./routes/transparencyRoutes');
+const fairPriceRoutes = require('./routes/fairPriceRoutes');
 const cron = require('node-cron');
 const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
 const { reconcileUnpaidOrders } = require('./jobs/reconcile');
 const { processPending: processPendingNotifications } = require('./jobs/notificationWorker');
+const { runMandiSync } = require('./jobs/mandiSync');
 const { corsMiddleware, securityHeaders, rateLimit } = require('./middleware/security');
 const { errorHandler } = require('./utils/errors');
 
@@ -64,6 +66,7 @@ app.use('/api', rateLimit({ max: 60 }), disputeRoutes); // Disputes & trust (Sta
 app.use('/api/assistant', assistantRoutes); // AI farmer assistant (Stage 8, module G; chat 30 / voice 10 limits live on the routes)
 app.use('/api/notifications', notificationRoutes); // Notifications & communication (Stage 9, module H; per-route limits live in the router)
 app.use('/api/transparency', rateLimit({ max: 60 }), transparencyRoutes); // Public transparency dashboard (Stage 10, module I; no auth — aggregated metrics only)
+app.use('/api/fairprice', rateLimit({ max: 60 }), fairPriceRoutes); // FairPrice (Stage 3, module B; public price reads, authed alerts — per-route limits live in the router)
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -102,6 +105,19 @@ cron.schedule('*/5 * * * *', async () => {
     const counts = await processPendingNotifications();
     console.log('Notification delivery result:', counts);
 });
+
+// Sync mandi prices from data.gov.in (twice daily, ~11:00 + ~20:30 IST):
+// the job is idempotent (UNIQUE + ON CONFLICT DO NOTHING), so a
+// re-run inserts nothing new; a failed run leaves yesterday's snapshot
+// in place and returns ok:false. Without DATA_GOV_API_KEY it logs a
+// clear error and no-ops — it never crashes the server.
+for (const time of ['30 11 * * *', '30 20 * * *']) {
+    cron.schedule(time, async () => {
+        console.log('Running Mandi Price Sync Job...');
+        const summary = await runMandiSync();
+        console.log('Mandi sync result:', JSON.stringify(summary));
+    }, { timezone: 'Asia/Kolkata' });
+}
 
 app.listen(PORT, () => {
     console.log(`\n✅ Escrow Backend running on http://localhost:${PORT}`);

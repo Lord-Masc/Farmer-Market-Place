@@ -145,6 +145,7 @@ function seedDb() {
     orders: [],
     idempotency_keys: [],
     audit_log: [],
+    mandi_prices: [],
   };
 }
 
@@ -179,11 +180,28 @@ const VALID_OFFER = {
 
 const ACCEPT_BODY = { delivery_address: 'Village X, Mathura' };
 
-describe('fairPriceAnchor (Stage 3 integration point)', () => {
-  test('returns null today — Stage 3 has not wired mandi_prices yet', () => {
+describe('fairPriceAnchor (Stage 3 wired)', () => {
+  test('returns null when mandi_prices has no rows for the crop', async () => {
+    setup(); // sets the supabase mock; seedDb has an empty mandi_prices
     jest.resetModules();
     const { getFairPriceAnchor } = require('../services/fairPriceAnchor');
-    expect(getFairPriceAnchor('Wheat')).toBeNull();
+    await expect(getFairPriceAnchor('Wheat')).resolves.toBeNull();
+  });
+
+  test('returns the latest modal when mandi_prices has the crop', async () => {
+    const { db } = setup();
+    db.mandi_prices = [{
+      id: 'mp1', commodity: 'Wheat', variety: '', grade: '', state: 'Uttar Pradesh',
+      district: 'Mathura', mandi: 'Mathura Mandi', date: '2026-11-12',
+      min_price: 2000, max_price: 2200, modal_price: 2100, unit: 'quintal',
+      source: 'Agmarknet / data.gov.in', raw: {}, synced_at: '2026-11-12T20:30:00.000Z',
+    }];
+    jest.resetModules();
+    const { getFairPriceAnchor } = require('../services/fairPriceAnchor');
+    await expect(getFairPriceAnchor('Wheat')).resolves.toEqual({
+      commodity: 'Wheat', modal_price: 2100, unit: 'quintal',
+      mandi: 'Mathura Mandi', date: '2026-11-12',
+    });
   });
 });
 

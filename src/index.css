@@ -1,3 +1,10 @@
+/* Wayfind tokens (Hallmark scaffold, theme Wayfind deal 2/3). Variables only —
+   no visual change by themselves; the theme applies via .wayfind in wayfind.css.
+   base.css from the same scaffold is NOT imported: its rules are global
+   (body/h1/...) and would leak the theme onto out-of-scope pages. */
+@import "./tokens.css";
+@import "./wayfind.css"; /* scoped .wayfind rules only — no visual change without the class */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

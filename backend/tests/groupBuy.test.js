@@ -564,22 +564,44 @@ describe('groupBuyService.closeGroup — negotiated path', () => {
     expect(db.orders).toHaveLength(2); // seed order-closed + this direct order
   });
 
-  test('an order whose quantity no longer matches the pooled total is a 409 GROUP_ORDER_MISMATCH', async () => {
+  test('negotiate -> accept -> join is 409 GROUP_NEGOTIATION_STARTED, then close still succeeds', async () => {
     const { db, service } = setup();
     const negotiation = require('../services/negotiationService');
     const { requirement } = await service.negotiateAsGroup('farmer1', 'gb1', { ...VALID_NEGOTIATE });
     const offer = await negotiation.createOffer('farmer2', requirement.id, {
       product_id: 'prod2', price: 2300, quantity: 600, expires_at: '2027-01-15T00:00:00.000Z',
     });
-    await negotiation.acceptOffer('farmer1', offer.id, { delivery_address: 'Village X, Mathura' });
-    // A fourth farmer joins after the offer locked 600 kg — the pool is now 700.
+    const { order } = await negotiation.acceptOffer('farmer1', offer.id, { delivery_address: 'Village X, Mathura' });
+    // Membership froze when negotiation started — a late join is rejected.
+    await expect(service.joinGroup('farmer4', 'gb1', { contribution_quantity: 100 }))
+      .rejects.toMatchObject({ status: 409, code: 'GROUP_NEGOTIATION_STARTED' });
+    expect(db.group_buy_participants.filter((p) => p.group_buy_id === 'gb1')).toHaveLength(3);
+    const result = await service.closeGroup('farmer1', 'gb1', {}, undefined);
+    expect(result.order.id).toBe(order.id);
+    expect(result.group_buy.status).toBe('closed');
+    expect(result.settlements).toHaveLength(3);
+    expect(result.settlements.reduce((sum, s) => sum + s.amount_paise, 0)).toBe(138000000);
+  });
+
+  test('a participant row added out of band after acceptance no longer bricks the close — the locked quantity wins', async () => {
+    const { db, service } = setup();
+    const negotiation = require('../services/negotiationService');
+    const { requirement } = await service.negotiateAsGroup('farmer1', 'gb1', { ...VALID_NEGOTIATE });
+    const offer = await negotiation.createOffer('farmer2', requirement.id, {
+      product_id: 'prod2', price: 2300, quantity: 600, expires_at: '2027-01-15T00:00:00.000Z',
+    });
+    const { order } = await negotiation.acceptOffer('farmer1', offer.id, { delivery_address: 'Village X, Mathura' });
+    // A fourth farmer's row lands out of band after the offer locked
+    // 600 kg — the pool is now 700, but the close trusts the agreement.
     db.group_buy_participants.push({
       id: 'p-late', group_buy_id: 'gb1', user_id: 'farmer4',
       contribution_quantity: 100, share: null, created_at: '2026-11-12T00:00:04.000Z',
     });
-    await expect(service.closeGroup('farmer1', 'gb1', {}, undefined))
-      .rejects.toMatchObject({ status: 409, code: 'GROUP_ORDER_MISMATCH' });
-    expect(db.group_buys.find((g) => g.id === 'gb1').status).toBe('open');
+    const result = await service.closeGroup('farmer1', 'gb1', {}, undefined);
+    expect(result.order.id).toBe(order.id);
+    expect(result.group_buy.status).toBe('closed');
+    expect(result.settlements).toHaveLength(4);
+    expect(result.settlements.reduce((sum, s) => sum + s.amount_paise, 0)).toBe(138000000);
   });
 });
 

@@ -5,11 +5,14 @@
 //
 // processPending(supabase, adapters, { now, limit }) drives the rows
 // emit() left 'pending' (email/sms) plus rows deferred by quiet hours:
-//   - Batch: pending/deferred rows, oldest first, limit 50. Due-ness
-//     (next_attempt_at NULL or <= now) is filtered here, not in the
-//     query — a deferred row's next_attempt_at is the quiet-end, and
-//     it must be picked up again once due. A row whose next_attempt_at
-//     is still in the future is skipped, never attempted early.
+//   - Batch: pending/deferred rows, oldest first, limit 50. The due
+//     predicate (next_attempt_at NULL or <= now) is IN the query, so
+//     the limit applies to due rows only — 50 not-yet-due rows can no
+//     longer starve a due row out of the batch. The in-memory `due`
+//     filter below stays as a backstop. A deferred row's
+//     next_attempt_at is the quiet-end, and it must be picked up again
+//     once due. A row whose next_attempt_at is still in the future is
+//     skipped, never attempted early.
 //   - In-app rows are 'sent' immediately with NO adapter call (the
 //     inbox IS the delivery; emit already marks them 'sent', this
 //     covers any row left pending by a replay).
@@ -109,6 +112,7 @@ async function processPending(supabase, adapters, opts = {}) {
     const { data: rows, error } = await client
       .from('notifications').select('*')
       .in('delivery_status', ['pending', 'deferred'])
+      .or(`next_attempt_at.is.null,next_attempt_at.lte.${now.toISOString()}`)
       .order('created_at', { ascending: true })
       .limit(limit);
     if (error) {

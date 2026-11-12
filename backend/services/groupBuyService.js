@@ -239,6 +239,12 @@ async function joinGroup(callerId, groupId, body = {}) {
     throw validationError('contribution_quantity must be a number greater than 0.');
   }
   const group = await fetchGroup(groupId);
+  // Membership freezes once negotiation starts (requirement linked):
+  // a late join would change the pooled total after the agreement
+  // locked its quantity, bricking the negotiated close permanently.
+  if (group.requirement_id) {
+    throw new AppError(409, 'GROUP_NEGOTIATION_STARTED', 'This group buy is in negotiation — new joins are closed.');
+  }
   if (group.status !== 'open') {
     throw new AppError(409, 'GROUP_NOT_OPEN', 'This group buy is no longer open.');
   }
@@ -315,8 +321,12 @@ async function negotiateAsGroup(callerId, groupId, body = {}) {
 // Owner only. Ends 'closed' with exactly one order_id and exactly one
 // settlement row per participant. Two paths, one outcome:
 // - Negotiated: the group's requirement has an agreement — reuse its
-//   order (verified: buyer is the owner, quantity is the pooled total).
-//   No new order is created.
+//   order (verified: buyer is the owner, quantity is the agreement's
+//   LOCKED quantity). No new order is created. Recovery from a late
+//   join: joins freeze once negotiation starts (joinGroup rejects when
+//   requirement_id is set), and the close trusts the locked quantity
+//   rather than the live pooled total — so a participant row added out
+//   of band after acceptance can no longer brick the close.
 // - Direct: no agreement — the owner buys the pooled quantity from a
 //   listing via the escrow path (stock check, cannot buy own product),
 //   at an optional locked unit_price. A requirement with no agreement
@@ -356,8 +366,12 @@ async function closeGroup(callerId, groupId, body = {}, idempotencyKey) {
     const agreement = getSingle(agreements);
     if (agreement) {
       order = await fetchOrder(agreement.order_id);
-      if (!order || order.buyer_id !== callerId || Number(order.quantity) !== total) {
-        throw new AppError(409, 'GROUP_ORDER_MISMATCH', 'The negotiated order does not match the pooled quantity.');
+      // The negotiated close trusts the AGREEMENT's locked quantity, not
+      // the live pooled total: joins freeze once negotiation starts, so
+      // the two agree — and a stray participant row added out of band
+      // (or a race) can no longer brick the close permanently.
+      if (!order || order.buyer_id !== callerId || Number(order.quantity) !== Number(agreement.locked_quantity)) {
+        throw new AppError(409, 'GROUP_ORDER_MISMATCH', 'The negotiated order does not match the agreed quantity.');
       }
     } else if (!body.product_id) {
       throw new AppError(409, 'GROUP_NEGOTIATION_PENDING', 'The group negotiation has no agreement yet.');

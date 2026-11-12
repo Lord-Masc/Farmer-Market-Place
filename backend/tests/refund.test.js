@@ -387,4 +387,62 @@ describe('refund idempotency', () => {
     expect(db.orders.filter((o) => o.id.startsWith('order_future_'))
       .every((o) => o.status === 'REFUND_PENDING')).toBe(true);
   });
+
+  test('(12) partial refund then full refund via refundOrder -> 409 REFUND_ALREADY_EXISTS, order NOT refunded', async () => {
+    const order = seedOrder({ status: 'PAID' });
+    const partial = await service.refundPartialOrder(order.id, 20000);
+    expect(partial.success).toBe(true);
+    expect(rzp.payments.refund.mock.calls.length).toBe(1);
+    expect(db.orders[0].status).toBe('PAID');
+    expect(db.payments[0].status).toBe('HELD');
+
+    await service.markRefundPending(order.id, { buyerId: 'buyer_1' });
+    const r = await service.refundOrder(order.id);
+    expect(r.success).toBe(false);
+    expect(r.code).toBe('REFUND_ALREADY_EXISTS');
+    // The order never flips to REFUNDED while only partially refunded.
+    expect(db.orders[0].status).toBe('REFUND_PENDING');
+    expect(db.payments[0].status).toBe('HELD');
+    // No gateway call for the remainder.
+    expect(rzp.payments.refund.mock.calls.length).toBe(1);
+    expect(db.refunds).toHaveLength(1);
+    expect(db.refunds[0]).toMatchObject({ order_id: order.id, amount: 200 });
+  });
+
+  test('(13) full refund then partial refund -> 409 REFUND_ALREADY_EXISTS (already blocked, pinned)', async () => {
+    const order = seedOrder();
+    const r = await service.refundOrder(order.id);
+    expect(r.success).toBe(true);
+    await expect(service.refundPartialOrder(order.id, 20000))
+      .rejects.toMatchObject({ status: 409, code: 'REFUND_ALREADY_EXISTS' });
+    expect(rzp.payments.refund.mock.calls.length).toBe(1);
+    expect(db.refunds).toHaveLength(1);
+    expect(db.orders[0].status).toBe('REFUNDED');
+  });
+
+  test('(14) reconcileRefunds with a partial ledger row does NOT mark the order REFUNDED', async () => {
+    const order = seedOrder({ status: 'REFUND_RECONCILE' });
+    db.refunds.push({
+      id: 'ref_partial', order_id: order.id,
+      gateway_refund_id: 'rfnd_partial_1', status: 'REFUNDED', amount: 200,
+    });
+    await service.reconcileRefunds();
+    expect(db.orders[0].status).toBe('REFUND_RECONCILE');
+    expect(db.payments[0].status).toBe('HELD');
+    expect(rzp.payments.refund.mock.calls.length).toBe(0);
+    expect(db.refunds).toHaveLength(1);
+  });
+
+  test('(15) auto-refund RPC path: a partial ledger row under a claimed order returns the claim, order stays REFUND_PENDING', async () => {
+    const order = seedOrder({ status: 'REFUND_PENDING' });
+    db.refunds.push({
+      id: 'ref_partial', order_id: order.id,
+      gateway_refund_id: 'rfnd_partial_1', status: 'REFUNDED', amount: 200,
+    });
+    await service.autoRefundJob();
+    expect(db.orders[0].status).toBe('REFUND_PENDING');
+    expect(db.payments[0].status).toBe('HELD');
+    expect(rzp.payments.refund.mock.calls.length).toBe(0);
+    expect(db.refunds).toHaveLength(1);
+  });
 });

@@ -11,10 +11,13 @@
 // A "no data" answer stores sources: [] explicitly with no_data: true,
 // so the conversation log is honest about what was (not) known.
 //
-// Stage 3 is BLOCKED: the mandi_prices table does NOT exist. The
-// price tool treats a table-missing error (PostgREST 42P01 / PGRST205)
-// as "no data available", never a 500 — and never invents a number.
+// Stage 3 has landed: the mandi_prices table holds the canonical
+// shape (commodity, modal_price in rupees per quintal, mandi, date).
+// The price tool treats a table-missing error (PostgREST 42P01 /
+// PGRST205) as "no data available", never a 500 — and never invents
+// a number.
 const supabaseAdmin = require('../utils/supabaseAdmin');
+const { normaliseCommodity } = require('./fairPriceService');
 const { AppError, notAccessible } = require('../utils/errors');
 const negotiationService = require('./negotiationService');
 const logisticsService = require('./logisticsService');
@@ -178,9 +181,9 @@ async function toolPrice(entities) {
   const { data, error } = await supabaseAdmin
     .from('mandi_prices')
     .select('*')
-    .eq('crop', crop)
+    .eq('commodity', normaliseCommodity(crop))
     .limit(5);
-  // Stage 3 has not landed: a missing table is "no data", not a 500.
+  // A missing table (pre-migration) is "no data", not a 500.
   if (error) {
     if (isTableMissing(error)) {
       return noData('price', entities, `${crop} ka mandi bhaav abhi uplabdh nahi hai. Mandi ke bhaav judne ke baad yahan dikhenge. (No mandi price data is available yet.)`);
@@ -192,14 +195,16 @@ async function toolPrice(entities) {
     return noData('price', entities, `${crop} ka mandi bhaav abhi uplabdh nahi hai. (No mandi price data is available for this crop yet.)`);
   }
   const row = rows[0];
+  // The response shape is unchanged (crop / price keys): the canonical
+  // row fields are mapped here, so callers never see the rename.
   const sources = rows.map((r) => ({
-    type: 'mandi_price', id: r.id, crop: r.crop, price: r.price,
-    mandi: r.mandi || null, unit: r.unit || null, date: r.date || r.as_on || null,
+    type: 'mandi_price', id: r.id, crop: r.commodity, price: r.modal_price,
+    mandi: r.mandi || null, unit: r.unit || null, date: r.date || null,
   }));
-  const price = row.price;
+  const price = row.modal_price;
   const unit = row.unit ? ` per ${row.unit}` : '';
   const mandi = row.mandi ? ` — ${row.mandi} mandi` : '';
-  const date = (row.date || row.as_on) ? `, ${row.date || row.as_on}` : '';
+  const date = row.date ? `, ${row.date}` : '';
   return {
     intent: 'price', entities,
     answer: `${crop} ka mandi bhaav ₹${price}${unit} hai${mandi}${date}. (Mandi price.)`,

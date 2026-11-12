@@ -147,6 +147,22 @@ that fallback must be named in the theme-application plan before building,
 or Hindi-heavy screens (Assistant, Notifications) keep a paired Devanagari
 face.
 
+**Application notes (2026-11-13, branch `feat/wayfind-theme`, local only).**
+Devanagari fallback DECIDED + VERIFIED: Chivo Mono has no Devanagari subset
+(checked via the Google Fonts css2 API — latin/latin-ext/vietnamese only;
+Noto Sans Mono also lacks one, and no monospace Devanagari face exists on
+Google Fonts). Stack is `"Chivo Mono", "Noto Sans Devanagari",
+ui-monospace, monospace` (`src/tokens.css` `--font-display`): Latin/digits
+stay Chivo Mono, Hindi falls back to Noto Sans Devanagari (400/500/700
+loaded in `index.html` alongside Chivo Mono 400/500/800). Applied as ONE
+scoped stylesheet `src/wayfind.css` + the `wayfind` class on 16 page
+`<main>`s (20 occurrences — the 4 admin pages have 2 shells each),
+VerificationQueue's 2 root divs, and the NotificationBell root Link.
+`src/base.css` from the scaffold was NOT imported (global body/h1 rules
+would leak onto out-of-scope pages) and deleted. Gate 64 waived by the
+theme itself (recorded in the `wayfind.css` stamp, accepted by sloplint).
+Screenshots + computed-style evidence in `docs/ai/TEST_CHECKLIST.md`.
+
 ---
 
 ## 3. Dose (`dose`) — dealt 3/3

@@ -314,7 +314,7 @@ const NegotiationThread = () => {
   return (
     <div className="min-h-screen font-dmsans bg-cream">
       <Navbar />
-      <main className="pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
+      <main className="wayfind pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
         {loading ? (
           <p className="text-center py-20 text-gray-600 italic">Loading negotiation...</p>
         ) : forbidden ? (

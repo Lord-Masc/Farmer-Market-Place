@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
 import { escrowFetch, listDisputes, passportFetch, uploadImage, listTransporters, quoteShipment, createShipment } from '../services/escrowApi';
 import CropPassportCard from '../components/CropPassportCard';
+import MandiPriceCard from '../components/MandiPriceCard';
+import NetEarnings from '../components/NetEarnings';
 import { validateImageFile } from '../utils/fileValidation';
 
 const FarmerDashboard = () => {
@@ -748,6 +750,19 @@ const FarmerDashboard = () => {
         return (
           <>
             {renderStats()}
+            {products.length > 0 && (
+              <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
+                <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Mandi Bhaav</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {[...new Set(products.map((p) => p.name))].map((crop) => (
+                    <MandiPriceCard key={crop} commodity={crop} />
+                  ))}
+                </div>
+                <div className="mt-6">
+                  <NetEarnings commodity={products[0].name} quantity={products[0].quantity} unit={products[0].unit} />
+                </div>
+              </section>
+            )}
             <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
                 <h2 className="font-playfair text-xl font-bold text-green-deep mb-6">Farmer Activity</h2>
                 <div className="space-y-4">
