@@ -4,8 +4,9 @@
 // type to any path. Now the file goes through this endpoint: requireAuth
 // first, then server-side MIME + magic-byte + size checks, then the
 // service-role client stores it under the caller's own path prefix:
-// product-items/<uid>-<uuid>.<ext>, profile-<uid>-<ts>.<ext>, or
-// verification-docs/<uid>-<uuid>.<ext> (Stage 1, kind=verification).
+// product-items/<uid>-<uuid>.<ext>, profile-<uid>-<ts>.<ext>,
+// verification-docs/<uid>-<uuid>.<ext> (Stage 1, kind=verification), or
+// delivery-proofs/<uid>-<uuid>.<ext> (Stage 6, kind=proof).
 // Stage 2 hardening: verification documents go to the PRIVATE
 // 'verification-docs' bucket (not the public product-images bucket) and
 // the response carries the path only — no publicUrl, which would be
@@ -57,10 +58,10 @@ function validateImageBuffer(buffer, contentType) {
   throw new AppError(422, 'INVALID_IMAGE', 'File is not a JPEG, PNG or WebP image.');
 }
 
-// POST /api/uploads/image?kind=product|profile|verification
+// POST /api/uploads/image?kind=product|profile|verification|proof
 router.post('/image', requireAuth, async (req, res, next) => {
   try {
-    const kind = ['product', 'profile', 'verification'].includes(req.query.kind)
+    const kind = ['product', 'profile', 'verification', 'proof'].includes(req.query.kind)
       ? req.query.kind
       : 'product';
     const { mime, ext } = validateImageBuffer(req.body, req.headers['content-type']);
@@ -68,21 +69,29 @@ router.post('/image', requireAuth, async (req, res, next) => {
     // product: product-items/<uid>-<uuid>.<ext>
     // profile: profile-<uid>-<timestamp>.<ext>
     // verification: verification-docs/<uid>-<uuid>.<ext>
+    // proof: delivery-proofs/<uid>-<uuid>.<ext> (Stage 6)
     const path = kind === 'profile'
       ? `profile-${req.user.id}-${Date.now()}.${ext}`
       : kind === 'verification'
         ? `verification-docs/${req.user.id}-${crypto.randomUUID()}.${ext}`
-        : `product-items/${req.user.id}-${crypto.randomUUID()}.${ext}`;
+        : kind === 'proof'
+          ? `delivery-proofs/${req.user.id}-${crypto.randomUUID()}.${ext}`
+          : `product-items/${req.user.id}-${crypto.randomUUID()}.${ext}`;
 
-    // Verification documents go to the private bucket; product/profile
-    // uploads stay on the public bucket (publicUrl still applies there).
-    const bucket = kind === 'verification' ? 'verification-docs' : 'product-images';
+    // Verification documents and delivery proof photos go to their
+    // PRIVATE buckets; product/profile uploads stay on the public bucket
+    // (publicUrl still applies there).
+    const bucket = kind === 'verification'
+      ? 'verification-docs'
+      : kind === 'proof'
+        ? 'delivery-proofs'
+        : 'product-images';
     const { error } = await supabaseAdmin.storage
       .from(bucket)
       .upload(path, req.body, { contentType: mime, upsert: false });
     if (error) throw new AppError(500, 'UPLOAD_FAILED', 'Image upload failed. Please try again.');
 
-    if (kind === 'verification') return res.status(201).json({ path });
+    if (kind === 'verification' || kind === 'proof') return res.status(201).json({ path });
 
     const { data } = supabaseAdmin.storage.from('product-images').getPublicUrl(path);
     return res.status(201).json({ publicUrl: data.publicUrl, path });
