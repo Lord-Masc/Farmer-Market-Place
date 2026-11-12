@@ -53,7 +53,7 @@ const Metrics = () => {
         {forbidden ? (
           <p className="py-20 text-center text-gray-500 font-medium">You don&apos;t have access to this page.</p>
         ) : loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading metrics...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading metrics...</p>
         ) : error ? (
           <p className="py-20 text-center text-red-600">{error}</p>
         ) : (

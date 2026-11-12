@@ -69,7 +69,7 @@ const Reconciliation = () => {
         {forbidden ? (
           <p className="py-20 text-center text-gray-500 font-medium">You don&apos;t have access to this page.</p>
         ) : loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading stuck money...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading stuck money...</p>
         ) : error ? (
           <p className="py-20 text-center text-red-600">{error}</p>
         ) : stuck.length === 0 ? (
@@ -81,7 +81,7 @@ const Reconciliation = () => {
                 <button
                   key={c}
                   onClick={() => setCategoryFilter(c)}
-                  className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${categoryFilter === c ? 'bg-green-deep text-white shadow-lg' : 'bg-white text-gray-400 hover:bg-amber/10 hover:text-amber'}`}
+                  className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${categoryFilter === c ? 'bg-green-deep text-white shadow-lg' : 'bg-white text-gray-600 hover:bg-amber/10 hover:text-amber'}`}
                 >
                   {c === 'all' ? 'All' : CATEGORY_LABELS[c]}
                 </button>
@@ -98,7 +98,7 @@ const Reconciliation = () => {
               <div className="bg-white rounded-[24px] p-6 shadow-sm overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead>
-                    <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                    <tr className="text-[10px] font-black uppercase text-gray-600 tracking-widest">
                       <th className="py-3 pr-4">Order</th>
                       <th className="py-3 pr-4">Category</th>
                       <th className="py-3 pr-4">Amount</th>

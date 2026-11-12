@@ -71,26 +71,26 @@ const AdminDashboard = () => {
         {forbidden ? (
           <p className="py-20 text-center text-gray-500 font-medium">You don&apos;t have access to this page.</p>
         ) : loading ? (
-          <p className="text-center py-20 text-gray-400 italic">Loading admin dashboard...</p>
+          <p className="text-center py-20 text-gray-600 italic">Loading admin dashboard...</p>
         ) : error ? (
           <p className="py-20 text-center text-red-600">{error}</p>
         ) : (
           <div>
             <section className="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-10">
               <div className="bg-white rounded-[24px] p-6 shadow-sm">
-                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Total orders</p>
+                <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Total orders</p>
                 <p className="text-2xl font-black text-green-deep">{metrics?.total_orders ?? 'No data yet'}</p>
               </div>
               <div className="bg-white rounded-[24px] p-6 shadow-sm">
-                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">GMV</p>
+                <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">GMV</p>
                 <p className="text-2xl font-black text-green-deep">{formatRupees(metrics?.gmv_paise)}</p>
               </div>
               <div className="bg-white rounded-[24px] p-6 shadow-sm">
-                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Disputes</p>
+                <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Disputes</p>
                 <p className="text-2xl font-black text-green-deep">{metrics?.dispute_count ?? 'No data yet'}</p>
               </div>
               <div className="bg-white rounded-[24px] p-6 shadow-sm">
-                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Stuck money</p>
+                <p className="text-xs text-gray-600 font-bold uppercase tracking-wider mb-1">Stuck money</p>
                 <p className="text-2xl font-black text-green-deep">
                   {stuck.length === 0 ? '₹0.00' : formatRupees(stuckTotalPaise)}
                 </p>

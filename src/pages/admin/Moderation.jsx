@@ -107,6 +107,7 @@ const Moderation = () => {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
+                  aria-label="User UUID or email"
                   placeholder="User UUID or email"
                   className="flex-1 bg-cream rounded-xl p-4 outline-none font-bold text-green-deep text-sm"
                 />
@@ -118,7 +119,7 @@ const Moderation = () => {
                   {lookingUp ? 'Looking up...' : 'Look up'}
                 </button>
               </form>
-              {lookupError && <p className="text-sm text-red-600 mt-4">{lookupError}</p>}
+              {lookupError && <p aria-live="polite" className="text-sm text-red-600 mt-4">{lookupError}</p>}
             </section>
 
             {(lookedUp || fallbackId) && (
@@ -172,7 +173,7 @@ const Moderation = () => {
                 )}
               </section>
             )}
-            {actionError && <p className="text-sm text-red-600">{actionError}</p>}
+            {actionError && <p aria-live="polite" className="text-sm text-red-600">{actionError}</p>}
           </div>
         )}
       </main>
