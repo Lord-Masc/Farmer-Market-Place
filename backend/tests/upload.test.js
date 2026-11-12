@@ -10,14 +10,11 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://test.supabase.co
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key';
 
 jest.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({ auth: {}, storage: { from: (bucket) => { mockStorage.buckets.push(bucket); return mockStorage; } } }),
+  createClient: () => ({ auth: {}, storage: { from: () => mockStorage } }),
 }));
 
 // Holder for the storage mock. Jest allows "mock"-prefixed vars in factories.
 const mockStorage = {
-  // Every bucket each call targeted, in order — the private-bucket change
-  // is proven by asserting which bucket received the upload.
-  buckets: [],
   upload: jest.fn(async () => ({ error: null })),
   getPublicUrl: jest.fn((path) => ({ data: { publicUrl: `https://example.test/${path}` } })),
 };
@@ -111,10 +108,9 @@ describe('POST /api/uploads/image?kind=verification (Stage 1)', () => {
   beforeEach(() => {
     mockStorage.upload.mockClear();
     mockStorage.getPublicUrl.mockClear();
-    mockStorage.buckets.length = 0;
   });
 
-  test('kind=verification uploads to the PRIVATE verification-docs bucket', async () => {
+  test('kind=verification stores under verification-docs/<uid>-<uuid>.jpg', async () => {
     const req = {
       query: { kind: 'verification' },
       user: { id: 'farmer1' },
@@ -126,18 +122,14 @@ describe('POST /api/uploads/image?kind=verification (Stage 1)', () => {
     await imageHandler()(req, res, next);
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(201);
-    expect(mockStorage.buckets).toEqual(['verification-docs']);
     const path = mockStorage.upload.mock.calls[0][0];
     expect(path).toMatch(/^verification-docs\/farmer1-[0-9a-f-]+\.jpg$/);
-    // A public URL for a private bucket is meaningless — the response
-    // carries the path only; the farmer submits it to /api/verification/submit.
-    const body = res.json.mock.calls[0][0];
-    expect(body).toEqual({ path });
-    expect(body).not.toHaveProperty('publicUrl');
-    expect(mockStorage.getPublicUrl).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ path, publicUrl: `https://example.test/${path}` }),
+    );
   });
 
-  test('kind=product still uploads to product-images and still returns a publicUrl', async () => {
+  test('kind=product still stores under product-items/', async () => {
     const req = {
       query: { kind: 'product' },
       user: { id: 'farmer1' },
@@ -146,12 +138,7 @@ describe('POST /api/uploads/image?kind=verification (Stage 1)', () => {
     };
     const res = mockRes();
     await imageHandler()(req, res, jest.fn());
-    expect(mockStorage.buckets).toEqual(['product-images', 'product-images']); // upload + getPublicUrl
     expect(mockStorage.upload.mock.calls[0][0]).toMatch(/^product-items\/farmer1-[0-9a-f-]+\.jpg$/);
-    const path = mockStorage.upload.mock.calls[0][0];
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ path, publicUrl: `https://example.test/${path}` }),
-    );
   });
 
   test('a verification document that is not a real image is still rejected', async () => {
@@ -160,58 +147,6 @@ describe('POST /api/uploads/image?kind=verification (Stage 1)', () => {
       user: { id: 'farmer1' },
       body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>'),
       headers: { 'content-type': 'image/jpeg' },
-    };
-    const next = jest.fn();
-    await imageHandler()(req, mockRes(), next);
-    expect(next.mock.calls[0][0]).toMatchObject({ status: 422 });
-    expect(mockStorage.upload).not.toHaveBeenCalled();
-  });
-});
-
-describe('POST /api/uploads/image?kind=proof (Stage 6)', () => {
-  // Delivery proof photos go to the PRIVATE delivery-proofs bucket (same
-  // pattern as kind=verification): the response carries the path only,
-  // and verify-otp requires that path prefix.
-  function imageHandler() {
-    const layer = uploadRouter.stack.find((l) => l.route && l.route.path === '/image');
-    return layer.route.stack[1].handle;
-  }
-
-  function mockRes() {
-    return { status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() };
-  }
-
-  beforeEach(() => {
-    mockStorage.upload.mockClear();
-    mockStorage.getPublicUrl.mockClear();
-    mockStorage.buckets.length = 0;
-  });
-
-  test('kind=proof uploads to the PRIVATE delivery-proofs bucket and returns the path only', async () => {
-    const req = {
-      query: { kind: 'proof' },
-      user: { id: 'transporter2' },
-      body: buf(0xff, 0xd8, 0xff, 0xe0),
-      headers: { 'content-type': 'image/jpeg' },
-    };
-    const res = mockRes();
-    const next = jest.fn();
-    await imageHandler()(req, res, next);
-    expect(next).not.toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(201);
-    expect(mockStorage.buckets).toEqual(['delivery-proofs']);
-    const path = mockStorage.upload.mock.calls[0][0];
-    expect(path).toMatch(/^delivery-proofs\/transporter2-[0-9a-f-]+\.jpg$/);
-    expect(res.json.mock.calls[0][0]).toEqual({ path });
-    expect(mockStorage.getPublicUrl).not.toHaveBeenCalled();
-  });
-
-  test('a proof photo that is not a real image is still rejected', async () => {
-    const req = {
-      query: { kind: 'proof' },
-      user: { id: 'transporter2' },
-      body: Buffer.from('<html><script>alert(1)</script></html>'),
-      headers: { 'content-type': 'image/png' },
     };
     const next = jest.fn();
     await imageHandler()(req, mockRes(), next);

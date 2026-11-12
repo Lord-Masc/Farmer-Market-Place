@@ -110,9 +110,6 @@ function seedDb() {
     refunds: [],
     idempotency_keys: [],
     verification_submissions: [],
-    // Stage 6: approve/reject also update the transporters row when one
-    // exists for the submission's user.
-    transporters: [],
     audit_log: [],
   };
 }
