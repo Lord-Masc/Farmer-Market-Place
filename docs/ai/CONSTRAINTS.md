@@ -9,6 +9,9 @@ These are project-specific guardrails. Ask before crossing any boundary.
 - Delete or rewrite existing migrations; make destructive schema/data changes.
 - Add dependencies, introduce a new service/provider, or change hosting architecture.
 - Claim live payment, payout, escrow, email, or production behavior was tested when only mocks/unit tests ran.
+- Apply a design theme to the live app without Rishabh's pick (Stage 11: Hallmark deals three themes, he picks one — never apply a theme to the existing design unasked).
+- Run any end-to-end test against live Supabase or live Razorpay (staging/local only; the live smoke test is Rishabh's, not an agent's).
+- Run the Strix pentest (or create a Strix account, register an asset, or spend credits) without Rishabh's explicit go-ahead — see `docs/ai/PENTEST_SCOPE.md`.
 
 ## Always preserve
 - Server-side validation of buyer identity, order ownership, payment amount, provider signature, captured status, and order/payment binding.
