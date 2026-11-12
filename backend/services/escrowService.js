@@ -462,9 +462,10 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
     // Capture the previous status BEFORE the update: the fetched row is a
     // live reference, so order.status changes once the update applies.
     const prevStatus = order.status;
+    const completedAt = new Date().toISOString();
     const { data, error: orderError } = await supabase
         .from('orders')
-        .update({ status: 'COMPLETED' })
+        .update({ status: 'COMPLETED', completed_at: completedAt })
         .eq('id', order_id)
         .in('status', ['PAID', 'SHIPPED'])
         .select('*');
@@ -482,16 +483,18 @@ exports.markOrderAsCompleted = async (order_id, buyer_id) => {
         .select('*');
     if (paymentError) {
         // The order is already COMPLETED — roll it back, otherwise the
-        // payment stays HELD forever with no reconciler (audit H2).
+        // payment stays HELD forever with no reconciler (audit H2). The
+        // completion timestamp is cleared too: the order never completed.
         const { error: rollbackError } = await supabase.from('orders')
-            .update({ status: prevStatus }).eq('id', order_id);
+            .update({ status: prevStatus, completed_at: null }).eq('id', order_id);
         if (rollbackError) console.error('Failed to roll back order after payment-release error:', rollbackError.message);
         throw paymentError;
     }
     if (!payData || payData.length === 0) {
         // No HELD payment to release — roll the order back and refuse.
+        // The completion timestamp is cleared with it.
         const { error: rollbackError } = await supabase.from('orders')
-            .update({ status: prevStatus }).eq('id', order_id);
+            .update({ status: prevStatus, completed_at: null }).eq('id', order_id);
         if (rollbackError) console.error('Failed to roll back order after unreleasable payment:', rollbackError.message);
         throw new AppError(409, 'ORDER_NOT_RELEASABLE', 'Only a paid or shipped order can be completed.');
     }

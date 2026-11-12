@@ -16,6 +16,14 @@ const { logAudit } = require('../utils/auditLog');
 const ROLES = ['buyer', 'farmer', 'admin'];
 const VERIFICATION_STATUSES = ['pending', 'approved', 'rejected'];
 
+// Stage 2 hardening: verification documents live in the PRIVATE
+// 'verification-docs' bucket (created in the Supabase Dashboard — bucket
+// creation is not SQL). No storage policies exist on that bucket, so only
+// the service-role client can read it; admins view a document through a
+// short-lived signed URL minted here.
+const DOCUMENT_BUCKET = 'verification-docs';
+const SIGNED_URL_TTL_SECONDS = 300;
+
 // Same getSingle shape as escrowService: supabase-js returns arrays.
 const getSingle = (data) => (data && data.length > 0 ? data[0] : null);
 
@@ -164,6 +172,27 @@ async function rejectVerification(adminId, submissionId, note) {
   return getSingle(updated);
 }
 
+// Admin views a farmer's document via a short-lived signed URL from the
+// private bucket. A submission whose document is not under
+// verification-docs/ (e.g. a Stage 1-era public-bucket path) is refused
+// with 422 — it is never served as a public URL. The audit write is best
+// effort: a failing insert must never break the response.
+async function getDocumentSignedUrl(adminId, submissionId) {
+  const submission = await fetchSubmission(submissionId);
+  if (typeof submission.document_path !== 'string'
+    || !submission.document_path.startsWith(`${DOCUMENT_BUCKET}/`)) {
+    throw new AppError(422, 'VALIDATION_ERROR', 'document is not stored in the private bucket.');
+  }
+  const { data, error } = await supabaseAdmin.storage
+    .from(DOCUMENT_BUCKET)
+    .createSignedUrl(submission.document_path, SIGNED_URL_TTL_SECONDS);
+  if (error || !data || !data.signedUrl) {
+    throw new AppError(500, 'DOCUMENT_URL_FAILED', 'Could not generate a document link. Please try again.');
+  }
+  await logAudit(adminId, 'verification.document_viewed', { submission_id: submission.id });
+  return { signedUrl: data.signedUrl, expiresIn: SIGNED_URL_TTL_SECONDS };
+}
+
 // Admin user list, newest first. Only the fields the admin UI needs.
 async function listRoles({ page, pageSize } = {}) {
   const { page: p, pageSize: ps } = parsePage({ page, pageSize });
@@ -214,6 +243,7 @@ module.exports = {
   listVerifications,
   approveVerification,
   rejectVerification,
+  getDocumentSignedUrl,
   listRoles,
   changeRole,
 };
