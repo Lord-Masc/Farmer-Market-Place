@@ -4,10 +4,13 @@ import { adminFetch } from '../../services/escrowApi';
 
 // Admin review queue + role management (Stage 1, trust foundation).
 // The server enforces admin-only access; a 403 here only changes the message.
-// Stage 2 hardening: documents live in the PRIVATE verification-docs
-// bucket, so there is no public URL to build — the admin fetches a
-// 5-minute signed URL on demand (GET /verifications/:id/document).
 const PAGE_SIZE = 20;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+
+// Public URL for a document in the public product-images bucket — the same
+// shape the backend's getPublicUrl() returns for its uploads.
+const documentUrl = (documentPath) =>
+    `${SUPABASE_URL}/storage/v1/object/public/product-images/${documentPath}`;
 
 const isForbidden = (err) =>
     err?.message?.includes('do not have permission');
@@ -23,8 +26,6 @@ const VerificationQueue = () => {
     const [rejectingId, setRejectingId] = useState(null);
     const [rejectNote, setRejectNote] = useState('');
     const [actionBusy, setActionBusy] = useState(null);
-    const [docBusy, setDocBusy] = useState(null);
-    const [docError, setDocError] = useState('');
 
     const [roles, setRoles] = useState([]);
     const [rolesPage, setRolesPage] = useState(1);
@@ -65,19 +66,6 @@ const VerificationQueue = () => {
 
     useEffect(() => { fetchQueue(status, page); }, [status, page]);
     useEffect(() => { fetchRoles(rolesPage); }, [rolesPage]);
-
-    const handleViewDocument = async (row) => {
-        setDocBusy(row.id);
-        setDocError('');
-        try {
-            const res = await adminFetch(`/verifications/${row.id}/document`);
-            window.open(res.signedUrl, '_blank', 'noopener,noreferrer');
-        } catch (err) {
-            setDocError(err.message);
-        } finally {
-            setDocBusy(null);
-        }
-    };
 
     const handleApprove = async (row) => {
         const name = `${row.farmer?.first_name || ''} ${row.farmer?.last_name || ''}`.trim() || 'this farmer';
@@ -175,16 +163,14 @@ const VerificationQueue = () => {
                                                 Submitted {row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}
                                                 {' · '}Status: {row.status}
                                             </p>
-                                            <button
-                                                onClick={() => handleViewDocument(row)}
-                                                disabled={docBusy === row.id}
-                                                className="text-sm font-bold text-green-fresh underline hover:text-amber disabled:opacity-50"
+                                            <a
+                                                href={documentUrl(row.document_path)}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-sm font-bold text-green-fresh underline hover:text-amber"
                                             >
-                                                {docBusy === row.id ? 'Loading document...' : 'View document'}
-                                            </button>
-                                            {docError && (
-                                                <p className="text-sm font-bold text-red-500">{docError}</p>
-                                            )}
+                                                View document
+                                            </a>
                                         </div>
                                         {row.status === 'pending' && (
                                             <div className="flex items-center gap-2">
