@@ -137,7 +137,7 @@ const GroupBuys = () => {
   return (
     <div className="min-h-screen font-dmsans bg-cream">
       <Navbar />
-      <main className="pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
+      <main className="wayfind pt-32 pb-20 px-[5%] max-w-[1400px] mx-auto">
         <header className="mb-10">
           <h1 className="font-playfair text-4xl font-black text-green-deep mb-2">Group buys</h1>
           <p className="text-[#4a4a4a] text-lg">Farmers pool quantities of the same crop and buy wholesale as one buyer.</p>
