@@ -12,6 +12,7 @@ const groupBuyRoutes = require('./routes/groupBuyRoutes');
 const logisticsRoutes = require('./routes/logisticsRoutes');
 const transporterRoutes = require('./routes/transporterRoutes');
 const disputeRoutes = require('./routes/disputeRoutes');
+const assistantRoutes = require('./routes/assistantRoutes');
 const cron = require('node-cron');
 const { autoRefundJob, reconcileRefunds } = require('./services/escrowService');
 const { reconcileUnpaidOrders } = require('./jobs/reconcile');
@@ -57,6 +58,7 @@ app.use('/api/group-buys', rateLimit({ max: 60 }), groupBuyRoutes); // Smart gro
 app.use('/api/shipments', rateLimit({ max: 60 }), logisticsRoutes); // Logistics & delivery (Stage 6, module E)
 app.use('/api/transporters', rateLimit({ max: 60 }), transporterRoutes); // Transporter registration (Stage 6, module E)
 app.use('/api', rateLimit({ max: 60 }), disputeRoutes); // Disputes & trust (Stage 7, module F)
+app.use('/api/assistant', assistantRoutes); // AI farmer assistant (Stage 8, module G; chat 30 / voice 10 limits live on the routes)
 
 // Health Check
 app.get('/health', (req, res) => {
