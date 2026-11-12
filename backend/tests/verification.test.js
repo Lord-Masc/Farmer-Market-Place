@@ -107,6 +107,9 @@ function seedDb() {
       { id: 'buyer1', first_name: 'Ramesh', last_name: 'Kumar', email_address: 'buyer1@example.com', role: 'buyer', verification_status: 'unverified', verified_at: null, verified_by: null, created_at: '2026-11-04T00:00:00.000Z' },
     ],
     verification_submissions: [],
+    // Stage 6: approve/reject also update the transporters row when one
+    // exists for the submission's user (no row here = farmer approvals).
+    transporters: [],
     audit_log: [],
   };
 }
