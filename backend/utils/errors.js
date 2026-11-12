@@ -24,6 +24,11 @@ function errorHandler(err, req, res, _next) {
   if (err instanceof AppError) {
     return res.status(err.status).json({ error: err.message, code: err.code });
   }
+  // body-parser size limits (e.g. the 5 MB raw-image cap on /api/uploads):
+  // answer 413, not a generic 500.
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body too large.', code: 'BODY_TOO_LARGE' });
+  }
   console.error('Unhandled error:', err);
   return res.status(500).json({ error: 'Internal server error.', code: 'INTERNAL_ERROR' });
 }
