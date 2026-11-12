@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch, uploadImage } from '../services/escrowApi';
+import { escrowFetch, passportFetch, uploadImage } from '../services/escrowApi';
+import CropPassportCard from '../components/CropPassportCard';
 import { validateImageFile } from '../utils/fileValidation';
 
 const FarmerDashboard = () => {
@@ -31,6 +32,21 @@ const FarmerDashboard = () => {
   const [listingSuccessMsg, setListingSuccessMsg] = useState("");
   const [lightbox, setLightbox] = useState({ show: false, images: [], index: 0, productName: '' });
   
+  // Crop Passport State (Stage 2): one passport per product, public only
+  // once the farmer is verified — the backend enforces both.
+  const [passports, setPassports] = useState([]);
+  const [passportStats, setPassportStats] = useState(null);
+  const [passportsLoading, setPassportsLoading] = useState(true);
+  const [passportError, setPassportError] = useState('');
+  const [showPassportForm, setShowPassportForm] = useState(false);
+  const [passportSaving, setPassportSaving] = useState(false);
+  const [passportFormError, setPassportFormError] = useState('');
+  const [passportForm, setPassportForm] = useState({
+    product_id: '', crop: '', variety: '', quantity: '', unit: 'kg',
+    harvest_date: '', quality_grade: 'ungraded',
+  });
+  const [passportPhotos, setPassportPhotos] = useState([]);
+
   // Form State
   const [formData, setFormData] = useState({
     name: '',
@@ -159,7 +175,7 @@ const FarmerDashboard = () => {
     }
   }, [userLocation, locationName]);
 
-  const tabs = ['Dashboard', 'My Products', 'Orders', 'Payment Track', 'Analytics', 'Settings'];
+  const tabs = ['Dashboard', 'My Products', 'Crop Passports', 'Orders', 'Payment Track', 'Analytics', 'Settings'];
 
   useEffect(() => {
     if (!user && !loading) {
@@ -194,7 +210,7 @@ const FarmerDashboard = () => {
                     setShowLocationModal(true);
                 }
             }
-            await Promise.all([fetchMyProducts(), fetchMyOrders()]);
+            await Promise.all([fetchMyProducts(), fetchMyOrders(), fetchMyPassports()]);
           }
         } catch (err) {
           setError('An unexpected error occurred.');
@@ -270,6 +286,86 @@ const FarmerDashboard = () => {
         console.error("Farmer Orders catch:", err);
         const { data: fallback } = await supabase.from('orders').select('*').eq('farmer_id', user.id);
         if (fallback) setOrders(fallback);
+    }
+  };
+
+  // Rates arrive as fractions (0–1); tolerate a backend that already sends a
+  // percent so a value can never render as e.g. 8500%.
+  const formatPassportRate = (rate) => (rate == null ? 'Not enough data yet' : `${Math.round(rate > 1 ? rate : rate * 100)}%`);
+
+  const fetchMyPassports = async () => {
+    setPassportsLoading(true);
+    setPassportError('');
+    try {
+        const data = await passportFetch('/mine');
+        setPassports(data.lots || []);
+        setPassportStats(data.stats ?? null);
+    } catch (err) {
+        setPassportError(err.message || 'Could not load your crop passports.');
+    } finally {
+        setPassportsLoading(false);
+    }
+  };
+
+  // Products that can still get a passport: one passport per product, so
+  // anything already in `passports` is excluded from the picker.
+  const passportableProducts = products.filter((p) => {
+    const hasPassport = passports.some((lot) => lot.product_id === p.id || lot.product_name === p.name);
+    return !hasPassport;
+  });
+
+  const handleCreatePassport = async (e) => {
+    e.preventDefault();
+    const quantity = parseFloat(passportForm.quantity);
+    if (!passportForm.product_id) {
+        setPassportFormError('Choose a product for this passport.');
+        return;
+    }
+    if (!passportForm.crop.trim()) {
+        setPassportFormError('Enter the crop name.');
+        return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+        setPassportFormError('Enter a valid quantity greater than 0.');
+        return;
+    }
+    if (!passportForm.harvest_date) {
+        setPassportFormError('Enter the harvest date.');
+        return;
+    }
+    if (passportPhotos.length > 5) {
+        setPassportFormError('Add at most 5 photos.');
+        return;
+    }
+
+    setPassportSaving(true);
+    setPassportFormError('');
+    try {
+        const photos = [];
+        for (const file of passportPhotos) {
+            photos.push(await uploadPhoto(file));
+        }
+        await passportFetch('/', {
+            method: 'POST',
+            body: {
+                product_id: passportForm.product_id,
+                crop: passportForm.crop.trim(),
+                variety: passportForm.variety.trim() || undefined,
+                quantity,
+                unit: passportForm.unit,
+                harvest_date: passportForm.harvest_date,
+                quality_grade: passportForm.quality_grade,
+                photos,
+            },
+        });
+        setPassportForm({ product_id: '', crop: '', variety: '', quantity: '', unit: 'kg', harvest_date: '', quality_grade: 'ungraded' });
+        setPassportPhotos([]);
+        setShowPassportForm(false);
+        await fetchMyPassports();
+    } catch (err) {
+        setPassportFormError(err.message || 'Could not create the passport.');
+    } finally {
+        setPassportSaving(false);
     }
   };
 
@@ -640,6 +736,98 @@ const FarmerDashboard = () => {
                         </div>
                     )}
                 </div>
+            </div>
+        );
+      case 'Crop Passports':
+        return (
+            <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                    <h2 className="font-playfair text-2xl font-bold text-green-deep">Crop passports</h2>
+                    {passportableProducts.length > 0 && (
+                        <button onClick={() => setShowPassportForm(!showPassportForm)} className="bg-green-deep text-white px-6 py-2 rounded-xl font-bold">
+                            {showPassportForm ? 'Cancel' : '+ Create Passport'}
+                        </button>
+                    )}
+                </div>
+
+                <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
+                    <h3 className="font-playfair text-xl font-bold text-green-deep mb-4">Your track record</h3>
+                    {!passportStats ? (
+                        <p className="text-gray-500 font-medium">No orders yet — stats appear after your first delivery.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Deliveries</p>
+                                <p className="text-2xl font-black text-green-deep">{passportStats.deliveries ?? 0}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">On-time rate</p>
+                                <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.on_time_rate)}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
+                                <p className="text-2xl font-black text-green-deep">{formatPassportRate(passportStats.dispute_rate)}</p>
+                            </div>
+                        </div>
+                    )}
+                </section>
+
+                {showPassportForm && (
+                    <section className="bg-white rounded-3xl p-8 shadow-sm border border-cream-dark">
+                        <h3 className="font-playfair text-xl font-bold text-green-deep mb-6">New crop passport</h3>
+                        <form onSubmit={handleCreatePassport} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="md:col-span-2">
+                                <label className="text-xs font-bold uppercase text-gray-400">Product</label>
+                                <select required className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.product_id} onChange={e => setPassportForm({ ...passportForm, product_id: e.target.value })}>
+                                    <option value="">Select a product...</option>
+                                    {passportableProducts.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Crop</label><input required className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Wheat..." value={passportForm.crop} onChange={e => setPassportForm({ ...passportForm, crop: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Variety</label><input className="w-full bg-cream rounded-xl p-4 mt-1" placeholder="Basmati..." value={passportForm.variety} onChange={e => setPassportForm({ ...passportForm, variety: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Quantity</label><input required type="number" min="0.01" step="0.01" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.quantity} onChange={e => setPassportForm({ ...passportForm, quantity: e.target.value })} /></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Unit</label><select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.unit} onChange={e => setPassportForm({ ...passportForm, unit: e.target.value })}><option>kg</option><option>quintal</option></select></div>
+                            <div><label className="text-xs font-bold uppercase text-gray-400">Harvest date</label><input required type="date" className="w-full bg-cream rounded-xl p-4 mt-1" value={passportForm.harvest_date} onChange={e => setPassportForm({ ...passportForm, harvest_date: e.target.value })} /></div>
+                            <div>
+                                <label className="text-xs font-bold uppercase text-gray-400">Quality grade</label>
+                                <select className="w-full bg-cream rounded-xl p-4 mt-1 font-bold" value={passportForm.quality_grade} onChange={e => setPassportForm({ ...passportForm, quality_grade: e.target.value })}>
+                                    <option value="A">A</option>
+                                    <option value="B">B</option>
+                                    <option value="C">C</option>
+                                    <option value="ungraded">Ungraded</option>
+                                </select>
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="text-xs font-bold uppercase text-gray-400">Photos (up to 5)</label>
+                                <input type="file" multiple accept="image/*" className="w-full bg-cream rounded-xl p-4 mt-1" onChange={e => setPassportPhotos(Array.from(e.target.files || []).slice(0, 5))} />
+                                {passportPhotos.length > 0 && <p className="text-xs text-gray-500 mt-2">{passportPhotos.length} photo{passportPhotos.length > 1 ? 's' : ''} selected</p>}
+                            </div>
+                            {passportFormError && <p className="md:col-span-2 text-sm text-red-600">{passportFormError}</p>}
+                            <button type="submit" disabled={passportSaving} className="md:col-span-2 bg-green-fresh text-white font-black py-4 rounded-xl disabled:opacity-50">
+                                {passportSaving ? 'Creating...' : 'Create Passport'}
+                            </button>
+                        </form>
+                    </section>
+                )}
+
+                {passportsLoading ? (
+                    <p className="text-center py-10 text-gray-400 italic">Loading your passports...</p>
+                ) : passportError ? (
+                    <p className="text-center py-10 text-red-600">{passportError}</p>
+                ) : passports.length === 0 ? (
+                    <div className="py-20 text-center border-4 border-dashed border-cream-dark rounded-[48px]">
+                        <p className="text-gray-400 font-bold italic mb-4 text-xl">No crop passports yet.</p>
+                        <p className="text-gray-400 text-sm">Create one for a product to show buyers where their food comes from.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {passports.map((lot) => (
+                            <CropPassportCard key={lot.id || lot.product_id || lot.crop} lot={lot} />
+                        ))}
+                    </div>
+                )}
             </div>
         );
       case 'Orders':

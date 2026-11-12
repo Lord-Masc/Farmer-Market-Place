@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { ordersFetch } from '../services/escrowApi';
+import { ordersFetch, publicPassportFetch } from '../services/escrowApi';
+import CropPassportCard from '../components/CropPassportCard';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import EscrowCheckout from '../components/EscrowCheckout';
@@ -21,6 +22,7 @@ const Checkout = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [productPassport, setProductPassport] = useState(null);
     // One idempotency key per checkout attempt, reused across retries so a
     // retried submit never creates a duplicate order.
     const orderKeyRef = useRef(null);
@@ -62,6 +64,17 @@ const Checkout = () => {
         };
         void load();
     }, [user?.id, orderId, productId]);
+
+    // The product's passport, when one exists. A 404 / empty response is a
+    // normal state (no verified passport), not an error — show nothing.
+    useEffect(() => {
+        if (!product?.id) return;
+        let cancelled = false;
+        publicPassportFetch(`/products/${product.id}/passport`)
+            .then((data) => { if (!cancelled && data.passport) setProductPassport(data.passport); })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [product?.id]);
 
     const unit = product?.unit || 'kg';
     const multiplier = unit === 'quintal' ? 100 : 1;
@@ -116,6 +129,16 @@ const Checkout = () => {
                             <>
                                 <h2 className="text-xl font-bold">{product.name}</h2>
                                 <p className="text-emerald-700 font-bold mt-2">₹{total || 0}</p>
+                                {product.farmer_id && (
+                                    <Link to={`/farmers/${product.farmer_id}`} className="block mt-3 text-sm font-bold text-emerald-700 hover:text-emerald-800">
+                                        View this farmer's crop passport →
+                                    </Link>
+                                )}
+                                {productPassport && (
+                                    <div className="mt-4">
+                                        <CropPassportCard lot={productPassport} />
+                                    </div>
+                                )}
                                 {!order && (
                                     <form onSubmit={placeRequest} className="mt-6 space-y-4">
                                         <label className="block text-sm font-semibold">Quantity ({unit})

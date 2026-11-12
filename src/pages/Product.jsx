@@ -103,6 +103,12 @@ const Products = () => {
                   
                   {product.farmer_id && <Link to={`/checkout?productId=${product.id}`} className="px-4 py-2 bg-green-deep text-white rounded-full font-bold text-sm hover:bg-green-mid transition-all shadow-md">Buy Now</Link>}
                 </div>
+
+                {product.farmer_id && (
+                  <Link to={`/farmers/${product.farmer_id}`} className="block mt-4 text-sm font-bold text-green-mid hover:text-green-deep transition-colors">
+                    View farmer passport →
+                  </Link>
+                )}
               </div>
             ))}
           </div>
