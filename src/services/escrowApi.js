@@ -30,7 +30,12 @@ async function authedFetch(base, path, { method = 'GET', body, headers = {} } = 
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new Error(data.error || data.message || `Request failed (${res.status})`);
+    // Attach the HTTP status so callers can tell a 403 (no access) from a
+    // real error without matching the backend message string (the brittle
+    // pattern VerificationQueue.jsx still uses — do not copy it).
+    const error = new Error(data.error || data.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
   }
 
   return data;
@@ -77,6 +82,25 @@ export async function publicPassportFetch(path) {
 // Farmer's own passports (/api/passports/*): create + list own lots.
 export async function passportFetch(path, opts = {}) {
   return authedFetch('/api/passports', path, opts);
+}
+
+// Negotiation (Stage 4, module C). Request bodies use the repo's house
+// style (snake_case, as in passport/order calls) — the contract's
+// camelCase names map: deliveryWindowStart → delivery_window_start,
+// deliveryWindowEnd → delivery_window_end, targetPrice → target_price,
+// expiresAt → expires_at. Response reads tolerate both casings.
+export async function requirementsFetch(path, opts = {}) {
+  return authedFetch('/api/requirements', path, opts);
+}
+
+// Counter / accept act on one offer (/api/offers/:id/*).
+export async function offersFetch(path, opts = {}) {
+  return authedFetch('/api/offers', path, opts);
+}
+
+// One negotiation thread (/api/negotiations/:id).
+export async function negotiationsFetch(path, opts = {}) {
+  return authedFetch('/api/negotiations', path, opts);
 }
 
 // Image upload (/api/uploads/*): the file goes as the raw request body so
