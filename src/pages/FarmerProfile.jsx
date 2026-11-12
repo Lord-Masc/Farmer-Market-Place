@@ -41,6 +41,14 @@ const FarmerProfile = () => {
   // a percent so a value can never render as e.g. 8500%.
   const formatRate = (rate) => (rate == null ? 'Not enough data yet' : `${Math.round(rate > 1 ? rate : rate * 100)}%`);
 
+  // Real disputes (Stage 7): the view renames the refund-flow proxy to
+  // refund_rate and adds real dispute_count + dispute_rate. The "Refund
+  // rate" line below reads refund_rate (falling back to dispute_rate for
+  // the pre-Stage-7 shape, where dispute_rate WAS the proxy). The real-
+  // dispute line renders only when at least one real dispute exists.
+  const realDisputeCount = stats?.dispute_count ?? null;
+  const realDisputeRate = stats?.dispute_rate ?? null;
+
   return (
     <div className="min-h-screen font-dmsans bg-cream">
       <Navbar />
@@ -85,8 +93,15 @@ const FarmerProfile = () => {
                   </div>
                   <div>
                     <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Refund rate (share of paid orders refunded)</p>
-                    <p className="text-2xl font-black text-green-deep">{formatRate(stats.dispute_rate)}</p>
+                    <p className="text-2xl font-black text-green-deep">{formatRate(stats.refund_rate ?? stats.dispute_rate)}</p>
                   </div>
+                  {realDisputeCount > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Dispute rate (real disputes)</p>
+                      <p className="text-2xl font-black text-green-deep">{formatRate(realDisputeRate)}</p>
+                      <p className="text-xs text-gray-500 mt-1">{realDisputeCount} dispute{realDisputeCount === 1 ? '' : 's'}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </section>

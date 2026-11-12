@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch, passportFetch, uploadImage, listTransporters, quoteShipment, createShipment } from '../services/escrowApi';
+import { escrowFetch, listDisputes, passportFetch, uploadImage, listTransporters, quoteShipment, createShipment } from '../services/escrowApi';
 import CropPassportCard from '../components/CropPassportCard';
 import { validateImageFile } from '../utils/fileValidation';
 
@@ -22,6 +22,18 @@ const FarmerDashboard = () => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  // Disputes keyed by order id (Stage 7): best-effort — a failed read
+  // leaves the map empty and the file link still goes to /disputes.
+  const [orderDisputes, setOrderDisputes] = useState({});
+
+  useEffect(() => {
+    if (!user) return;
+    listDisputes().then((res) => {
+      const map = {};
+      (res.disputes || []).forEach((d) => { if (d.order_id) map[d.order_id] = d.id; });
+      setOrderDisputes(map);
+    }).catch(() => {});
+  }, [user]);
   const [editingProduct, setEditingProduct] = useState(null);
   const [productToDelete, setProductToDelete] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -1007,6 +1019,15 @@ const FarmerDashboard = () => {
                                                 <span className="text-[10px] font-black text-red-400 uppercase italic">
                                                     Order Rejected
                                                 </span>
+                                            )}
+                                            {orderDisputes[order.id] ? (
+                                                <Link to={`/disputes/${orderDisputes[order.id]}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline">
+                                                    View dispute →
+                                                </Link>
+                                            ) : ['PAID', 'SHIPPED', 'DELIVERED', 'COMPLETED'].includes(order.status) && (
+                                                <Link to={`/disputes?order=${encodeURIComponent(order.id)}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline">
+                                                    File a dispute
+                                                </Link>
                                             )}
                                         </div>
                                     </td>

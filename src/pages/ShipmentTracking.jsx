@@ -139,6 +139,14 @@ const ShipmentTracking = () => {
                   <Link to={`/checkout?orderId=${encodeURIComponent(shipment.order_id)}`} className="font-bold text-green-mid hover:text-green-deep">View order →</Link>
                 </p>
               )}
+              {/* Delivery disputes are for the buyer/farmer of the order —
+                  never the transporter. The link preselects the order on
+                  the disputes page; filing itself is backend-enforced. */}
+              {shipment.order_id && !isTransporter && (
+                <p className="text-sm mt-2">
+                  <Link to={`/disputes?order=${encodeURIComponent(shipment.order_id)}`} className="font-bold text-amber hover:underline">File a delivery dispute →</Link>
+                </p>
+              )}
             </section>
 
             {buyerOtp != null && (

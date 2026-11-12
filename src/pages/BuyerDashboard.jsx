@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch, ordersFetch, uploadImage } from '../services/escrowApi';
+import { escrowFetch, listDisputes, ordersFetch, uploadImage } from '../services/escrowApi';
 import { validateImageFile } from '../utils/fileValidation';
 
 const BuyerDashboard = () => {
@@ -24,6 +24,18 @@ const BuyerDashboard = () => {
   // Data State
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
+  // Disputes keyed by order id (Stage 7): best-effort — a failed read
+  // leaves the map empty and the file link still goes to /disputes.
+  const [orderDisputes, setOrderDisputes] = useState({});
+
+  useEffect(() => {
+    if (!user) return;
+    listDisputes().then((res) => {
+      const map = {};
+      (res.disputes || []).forEach((d) => { if (d.order_id) map[d.order_id] = d.id; });
+      setOrderDisputes(map);
+    }).catch(() => {});
+  }, [user]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [orderFilter, setOrderFilter] = useState('All'); // For My Orders tab
@@ -784,6 +796,15 @@ const BuyerDashboard = () => {
                                                 <span className="text-[10px] font-black text-green-fresh uppercase italic flex items-center justify-end gap-1">
                                                     <span>✨</span> Order Completed
                                                 </span>
+                                            )}
+                                            {orderDisputes[order.id] ? (
+                                                <Link to={`/disputes/${orderDisputes[order.id]}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline text-right">
+                                                    View dispute →
+                                                </Link>
+                                            ) : ['PAID', 'SHIPPED', 'DELIVERED', 'COMPLETED'].includes(order.status) && (
+                                                <Link to={`/disputes?order=${encodeURIComponent(order.id)}`} className="block mt-2 text-[10px] font-black uppercase text-amber hover:underline text-right">
+                                                    File a dispute
+                                                </Link>
                                             )}
                                         </td>
                                     </tr>
