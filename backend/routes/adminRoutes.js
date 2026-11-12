@@ -27,6 +27,20 @@ router.get('/verifications', async (req, res, next) => {
   }
 });
 
+// Signed URL for one submission's document (Stage 2 hardening). The
+// document lives in the private verification-docs bucket, so the admin
+// queue fetches a 5-minute signed URL on demand instead of building a
+// public URL. requireAuth + requireAdmin already apply to this router.
+router.get('/verifications/:id/document', async (req, res, next) => {
+  try {
+    if (!req.params.id) throw new AppError(400, 'MISSING_FIELDS', 'Verification id is required.');
+    const result = await verificationService.getDocumentSignedUrl(req.user.id, req.params.id);
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // Approve a pending submission; the farmer becomes 'verified'.
 router.post('/verifications/:id/approve', async (req, res, next) => {
   try {

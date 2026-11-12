@@ -6,6 +6,10 @@
 // service-role client stores it under the caller's own path prefix:
 // product-items/<uid>-<uuid>.<ext>, profile-<uid>-<ts>.<ext>, or
 // verification-docs/<uid>-<uuid>.<ext> (Stage 1, kind=verification).
+// Stage 2 hardening: verification documents go to the PRIVATE
+// 'verification-docs' bucket (not the public product-images bucket) and
+// the response carries the path only — no publicUrl, which would be
+// meaningless for a private bucket. Product/profile uploads are unchanged.
 // SVG/HTML are rejected by the magic-byte check (they are text, not one of
 // the three image signatures) and by the content-type allowlist.
 // Body is express.raw() (mounted in server.js, 5 MB limit); no multipart
@@ -70,10 +74,15 @@ router.post('/image', requireAuth, async (req, res, next) => {
         ? `verification-docs/${req.user.id}-${crypto.randomUUID()}.${ext}`
         : `product-items/${req.user.id}-${crypto.randomUUID()}.${ext}`;
 
+    // Verification documents go to the private bucket; product/profile
+    // uploads stay on the public bucket (publicUrl still applies there).
+    const bucket = kind === 'verification' ? 'verification-docs' : 'product-images';
     const { error } = await supabaseAdmin.storage
-      .from('product-images')
+      .from(bucket)
       .upload(path, req.body, { contentType: mime, upsert: false });
     if (error) throw new AppError(500, 'UPLOAD_FAILED', 'Image upload failed. Please try again.');
+
+    if (kind === 'verification') return res.status(201).json({ path });
 
     const { data } = supabaseAdmin.storage.from('product-images').getPublicUrl(path);
     return res.status(201).json({ publicUrl: data.publicUrl, path });
