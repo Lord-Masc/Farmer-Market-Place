@@ -39,6 +39,12 @@ const Navbar = () => {
       </div>
 
       <div className="flex items-center gap-3">
+        <Link
+          to="/transparency"
+          className="font-dmsans text-[0.9rem] font-medium text-[#4a4a4a] hover:text-green-mid transition-colors duration-200"
+        >
+          Transparency
+        </Link>
         {user ? (
           /* ── LOGGED IN STATE ── */
           <div className="flex items-center gap-3">
@@ -132,6 +138,15 @@ const Navbar = () => {
                   >
                     🔔 Notifications
                   </Link>
+                  {profile?.role === 'admin' && (
+                    <Link
+                      to="/admin"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold text-green-deep hover:bg-cream transition-colors"
+                    >
+                      🛡️ Admin dashboard
+                    </Link>
+                  )}
                   {profile?.role === 'admin' && (
                     <Link
                       to="/admin/verifications"
