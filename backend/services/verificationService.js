@@ -12,18 +12,9 @@
 const supabaseAdmin = require('../utils/supabaseAdmin');
 const { AppError } = require('../utils/errors');
 const { logAudit } = require('../utils/auditLog');
-const notificationService = require('./notificationService');
 
 const ROLES = ['buyer', 'farmer', 'admin'];
 const VERIFICATION_STATUSES = ['pending', 'approved', 'rejected'];
-
-// Stage 2 hardening: verification documents live in the PRIVATE
-// 'verification-docs' bucket (created in the Supabase Dashboard — bucket
-// creation is not SQL). No storage policies exist on that bucket, so only
-// the service-role client can read it; admins view a document through a
-// short-lived signed URL minted here.
-const DOCUMENT_BUCKET = 'verification-docs';
-const SIGNED_URL_TTL_SECONDS = 300;
 
 // Same getSingle shape as escrowService: supabase-js returns arrays.
 const getSingle = (data) => (data && data.length > 0 ? data[0] : null);
@@ -92,13 +83,6 @@ async function submitVerification(farmerId, documentPath) {
     .eq('id', farmerId);
   if (profileError) throw profileError;
   await logAudit(farmerId, 'verification.submitted', { submission_id: submission.id, farmer_id: farmerId });
-  // Stage 9: the admins learn a verification is waiting for review
-  // (zero admins = no rows, by design).
-  await notificationService.emit({
-    eventId: `verification:${submission.id}:submitted`, type: 'verification_submitted',
-    userIds: [], includeAdmins: true,
-    payload: { submission_id: submission.id, farmer_id: farmerId },
-  });
   return submission;
 }
 
@@ -152,25 +136,7 @@ async function approveVerification(adminId, submissionId) {
     .update({ verification_status: 'verified', verified_at: now, verified_by: adminId })
     .eq('id', submission.farmer_id);
   if (profileError) throw profileError;
-  // Stage 6: approving a transporter submission also verifies the
-  // transporters row for that user (no second admin queue). No row
-  // exists for a farmer approval — the update then matches nothing.
-  const { data: transporterRows, error: transporterError } = await supabaseAdmin
-    .from('transporters')
-    .update({ verification_status: 'verified' })
-    .eq('user_id', submission.farmer_id)
-    .select('id');
-  if (transporterError) throw transporterError;
-  if (transporterRows && transporterRows.length > 0) {
-    await logAudit(adminId, 'transporter.approved', { submission_id: submission.id, user_id: submission.farmer_id });
-  }
   await logAudit(adminId, 'verification.approved', { submission_id: submission.id, farmer_id: submission.farmer_id });
-  // Stage 9: the farmer learns their verification was approved.
-  await notificationService.emit({
-    eventId: `verification:${submission.id}:approved`, type: 'verification_approved',
-    userIds: [submission.farmer_id],
-    payload: { submission_id: submission.id },
-  });
   return getSingle(updated);
 }
 
@@ -194,47 +160,8 @@ async function rejectVerification(adminId, submissionId, note) {
     .update({ verification_status: 'rejected' })
     .eq('id', submission.farmer_id);
   if (profileError) throw profileError;
-  // Stage 6: rejecting a transporter submission also rejects the
-  // transporters row for that user (no second admin queue).
-  const { data: transporterRows, error: transporterError } = await supabaseAdmin
-    .from('transporters')
-    .update({ verification_status: 'rejected' })
-    .eq('user_id', submission.farmer_id)
-    .select('id');
-  if (transporterError) throw transporterError;
-  if (transporterRows && transporterRows.length > 0) {
-    await logAudit(adminId, 'transporter.rejected', { submission_id: submission.id, user_id: submission.farmer_id });
-  }
   await logAudit(adminId, 'verification.rejected', { submission_id: submission.id, farmer_id: submission.farmer_id });
-  // Stage 9: the farmer learns their verification was rejected, with
-  // the admin's review note as the reason.
-  await notificationService.emit({
-    eventId: `verification:${submission.id}:rejected`, type: 'verification_rejected',
-    userIds: [submission.farmer_id],
-    payload: { submission_id: submission.id, note: note.trim() },
-  });
   return getSingle(updated);
-}
-
-// Admin views a farmer's document via a short-lived signed URL from the
-// private bucket. A submission whose document is not under
-// verification-docs/ (e.g. a Stage 1-era public-bucket path) is refused
-// with 422 — it is never served as a public URL. The audit write is best
-// effort: a failing insert must never break the response.
-async function getDocumentSignedUrl(adminId, submissionId) {
-  const submission = await fetchSubmission(submissionId);
-  if (typeof submission.document_path !== 'string'
-    || !submission.document_path.startsWith(`${DOCUMENT_BUCKET}/`)) {
-    throw new AppError(422, 'VALIDATION_ERROR', 'document is not stored in the private bucket.');
-  }
-  const { data, error } = await supabaseAdmin.storage
-    .from(DOCUMENT_BUCKET)
-    .createSignedUrl(submission.document_path, SIGNED_URL_TTL_SECONDS);
-  if (error || !data || !data.signedUrl) {
-    throw new AppError(500, 'DOCUMENT_URL_FAILED', 'Could not generate a document link. Please try again.');
-  }
-  await logAudit(adminId, 'verification.document_viewed', { submission_id: submission.id });
-  return { signedUrl: data.signedUrl, expiresIn: SIGNED_URL_TTL_SECONDS };
 }
 
 // Admin user list, newest first. Only the fields the admin UI needs.
@@ -287,7 +214,6 @@ module.exports = {
   listVerifications,
   approveVerification,
   rejectVerification,
-  getDocumentSignedUrl,
   listRoles,
   changeRole,
 };
