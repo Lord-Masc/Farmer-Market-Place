@@ -25,24 +25,24 @@ describe('farmer order approval', () => {
 
   beforeEach(() => {
     jest.resetModules();
-    order = { id: 'order-1', buyer_id: 'buyer-1', farmer_id: 'farmer-1', status: 'pending' };
-    rpc = jest.fn(async () => ({ data: [{ ...order, status: 'confirmed' }], error: null }));
+    order = { id: 'order-1', buyer_id: 'buyer-1', farmer_id: 'farmer-1', status: 'PENDING' };
+    rpc = jest.fn(async () => ({ data: [{ ...order, status: 'CONFIRMED' }], error: null }));
     mockHolder.client = { from: () => ({ select: () => query([order]) }), rpc };
     service = require('../services/escrowService');
   });
 
   test('uses one database transaction for stock reservation and approval', async () => {
-    const result = await service.updateOrderStatusWithStock('order-1', 'farmer-1', 'confirmed');
+    const result = await service.updateOrderStatusWithStock('order-1', 'farmer-1', 'CONFIRMED');
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith('confirm_order_and_reserve_stock', {
       p_order_id: 'order-1', p_farmer_id: 'farmer-1',
     });
-    expect(result.status).toBe('confirmed');
+    expect(result.status).toBe('CONFIRMED');
   });
 
   test('reports insufficient stock without approving the order', async () => {
     rpc.mockResolvedValue({ data: null, error: { message: 'INSUFFICIENT_STOCK' } });
-    await expect(service.updateOrderStatusWithStock('order-1', 'farmer-1', 'confirmed'))
+    await expect(service.updateOrderStatusWithStock('order-1', 'farmer-1', 'CONFIRMED'))
       .rejects.toMatchObject({ code: 'INSUFFICIENT_STOCK', status: 409 });
   });
 });

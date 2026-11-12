@@ -325,9 +325,19 @@ describe('refund idempotency', () => {
     expect(rzp.payments.refund.mock.calls.length).toBe(0);
   });
 
-  test('(8) NULL delivery deadline — auto-refund enqueues and refunds the order', async () => {
+  test('(8) NULL delivery deadline — a fresh order is NOT auto-refunded (M4 guard)', async () => {
     const order = seedOrder({ status: 'PAID' });
     order.delivery_deadline = null;
+    await service.autoRefundJob();
+    expect(db.refunds.length).toBe(0);
+    expect(rzp.payments.refund.mock.calls.length).toBe(0);
+    expect(db.orders[0].status).toBe('PAID');
+  });
+
+  test('(8b) NULL delivery deadline — an order older than the grace period WITH a payment row is refunded', async () => {
+    const order = seedOrder({ status: 'PAID' });
+    order.delivery_deadline = null;
+    order.created_at = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
     await service.autoRefundJob();
     expect(db.refunds.length).toBe(1);
     expect(rzp.payments.refund.mock.calls.length).toBe(1);
