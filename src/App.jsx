@@ -11,6 +11,7 @@ import SpentAnalysis from './pages/SpentAnalysis';
 import ConfirmedOrders from './pages/ConfirmedOrders';
 import PendingOrders from './pages/PendingOrders';
 import UserProfile from './pages/UserProfile';
+import FarmerProfile from './pages/FarmerProfile';
 import VerificationQueue from './pages/admin/VerificationQueue';
 import Checkout from './pages/Checkout';
 import EscrowTest from './pages/EscrowTest';
@@ -27,6 +28,7 @@ function App() {
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/signup" element={<SignUp />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/farmers/:id" element={<FarmerProfile />} />
             <Route path="/farmer-dashboard" element={<FarmerDashboard />} />
             <Route path="/buyer-dashboard" element={<BuyerDashboard />} />
             <Route path="/spent-analysis" element={<SpentAnalysis />} />
