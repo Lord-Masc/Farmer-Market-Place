@@ -61,6 +61,68 @@ export async function adminFetch(path, opts = {}) {
   return authedFetch('/api/admin', path, opts);
 }
 
+// Admin & platform intelligence (Stage 10, module I). Contract shapes:
+// GET /api/admin/metrics → { metrics: { total_orders, gmv_paise,
+// median_realisation_paise, mandi_modal_paise, dispute_rate,
+// dispute_count, avg_resolution_hours, on_time_rate, group_selling:
+// { groups_total, groups_closed, pooled_quantity, pooled_gmv_paise },
+// notification_delivery: { sent, failed, deferred, pending } } } —
+// every value a real number or null (null = no data; mandi_modal_paise
+// is null until Stage 3 FairPrice lands).
+export async function adminMetricsFetch() {
+  return adminFetch('/metrics');
+}
+
+// GET /api/admin/reconciliation → { stuck: [ { order_id, category,
+// amount_paise, order_status, payment_status, created_at } ] } with
+// category in ('confirmed_unpaid','completed_held','refund_reconcile').
+export async function adminReconciliationFetch() {
+  return adminFetch('/reconciliation');
+}
+
+// Moderation (/api/admin/moderation/*). The suspend/reinstate POSTs are
+// the contract: suspend → { user: { id, role, suspended_at },
+// listings_hidden: n }; reinstate → { user: { id, role,
+// suspended_at: null }, listings_restored: n }.
+// The lookup GET below was not in the original brief's contract (it listed
+// only the two POSTs); the coordinator confirmed Unit A ships
+// GET /api/admin/moderation/:query (id or email) returning
+// { user: { id, role, suspended_at } }. If it 404s, the page shows the
+// lookup error honestly and the buttons still work from the entered id,
+// since the POSTs return the user themselves.
+export async function moderationFetch(path, opts = {}) {
+  return adminFetch(`/moderation${path}`, opts);
+}
+
+export async function getModerationUser(query) {
+  return moderationFetch(`/${encodeURIComponent(query)}`);
+}
+
+export async function suspendUser(userId) {
+  return moderationFetch(`/${encodeURIComponent(userId)}/suspend`, { method: 'POST' });
+}
+
+export async function reinstateUser(userId) {
+  return moderationFetch(`/${encodeURIComponent(userId)}/reinstate`, { method: 'POST' });
+}
+
+// Public transparency metrics (Stage 10). No session required:
+// GET /api/transparency → { metrics: { <same aggregated fields as
+// /api/admin/metrics> } } — aggregated only, never per-user data.
+export async function transparencyFetch() {
+  const res = await fetch(`${ESCROW_API_URL}/api/transparency`);
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const error = new Error(data.error || data.message || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+
+  return data;
+}
+
 // Public passport reads (/api/farmers/:id/passport, /api/products/:id/passport).
 // No session required: anyone may view a verified farmer's passport. Throws
 // the backend's message on failure; the HTTP status is attached to the
