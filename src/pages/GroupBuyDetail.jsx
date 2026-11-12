@@ -15,9 +15,11 @@ import {
 // participant's share of the pooled order total. Settlement rows record
 // what each participant owes toward the pooled order (integer paise);
 // collection is a later stage, so amounts are never labelled "payout".
-// Transport is Stage 6: the API returns transport: null and nothing is
-// rendered for it here. A 404 passport (missing/unverified farmer)
-// renders no passport and no name — never a fake badge.
+// Transport is Stage 6: the API returns a shared-transport summary
+// (transport: { shipment_id, transporter_id, status, price_paise,
+// shared_by }) once the pooled lot has a shipment, null otherwise —
+// nothing renders when it is null. A 404 passport (missing/unverified
+// farmer) renders no passport and no name — never a fake badge.
 const GroupBuyDetail = () => {
   const { id } = useParams();
   const { user, profile, loading: authLoading } = useAuth();
@@ -315,10 +317,25 @@ const GroupBuyDetail = () => {
               )}
             </header>
 
-            {/* Transport slot (Stage 6): the API returns transport: null for
-                this stage, so nothing is rendered here. Stage 6 wires the
-                shared transport booking into this block. */}
-            {detail?.transport != null && null}
+            {/* Shared transport (Stage 6): the pooled lot's shipment,
+                when one is booked. Nothing renders while transport is null. */}
+            {detail?.transport && (
+              <section className="bg-white rounded-[24px] p-6 shadow-sm mb-10">
+                <h2 className="font-playfair text-xl font-bold text-green-deep mb-4">Shared transport</h2>
+                <p className="text-sm text-[#4a4a4a]">
+                  Status: <span className="font-bold">{detail.transport.status}</span>
+                  {detail.transport.price_paise != null && (
+                    <> · Price: <span className="font-bold">{formatRupees(detail.transport.price_paise)}</span></>
+                  )}
+                  {detail.transport.shared_by != null && (
+                    <> · Shared by {detail.transport.shared_by} participant{detail.transport.shared_by === 1 ? '' : 's'}</>
+                  )}
+                </p>
+                <p className="text-sm mt-2">
+                  <Link to={`/shipments/${detail.transport.shipment_id}/track`} className="font-bold text-green-mid hover:text-green-deep">Track shipment →</Link>
+                </p>
+              </section>
+            )}
 
             {canJoin && (
               <section className="bg-white rounded-[24px] p-6 shadow-sm mb-10">

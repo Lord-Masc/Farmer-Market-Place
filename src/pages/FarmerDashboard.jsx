@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../services/supabase';
-import { escrowFetch, passportFetch, uploadImage } from '../services/escrowApi';
+import { escrowFetch, passportFetch, uploadImage, listTransporters, quoteShipment, createShipment } from '../services/escrowApi';
 import CropPassportCard from '../components/CropPassportCard';
 import { validateImageFile } from '../utils/fileValidation';
 
@@ -27,6 +27,20 @@ const FarmerDashboard = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [processingOrders, setProcessingOrders] = useState({});
+
+  // Ship-with-transporter booking (Stage 6): the Ship button opens this
+  // modal instead of flipping the order straight to SHIPPED.
+  const [shipOrderId, setShipOrderId] = useState(null);
+  const [shipTransporters, setShipTransporters] = useState([]);
+  const [shipLoading, setShipLoading] = useState(false);
+  const [shipSelected, setShipSelected] = useState('');
+  const [shipQuote, setShipQuote] = useState(null);
+  const [shipQuoteLoading, setShipQuoteLoading] = useState(false);
+  const [shipWindowStart, setShipWindowStart] = useState('');
+  const [shipWindowEnd, setShipWindowEnd] = useState('');
+  const [shipError, setShipError] = useState('');
+  const [shipBooking, setShipBooking] = useState(false);
+  const [shipBookedId, setShipBookedId] = useState(null);
   const [escrowNotification, setEscrowNotification] = useState({ show: false, orderId: null, amount: 0 });
   const [showListingSuccess, setShowListingSuccess] = useState(false);
   const [listingSuccessMsg, setListingSuccessMsg] = useState("");
@@ -573,7 +587,31 @@ const FarmerDashboard = () => {
     setShowDeleteModal(true);
   };
 
+  // Stage 6: clicking Ship opens the transporter booking flow. The
+  // self-delivery fallback below keeps the live Stage 0 /ship-order path
+  // byte-identical, so it never breaks.
   const handleShipOrder = async (orderId) => {
+    if (!orderId) return;
+    setShipOrderId(orderId);
+    setShipSelected('');
+    setShipQuote(null);
+    setShipWindowStart('');
+    setShipWindowEnd('');
+    setShipError('');
+    setShipBookedId(null);
+    setShipLoading(true);
+    try {
+        const res = await listTransporters();
+        setShipTransporters(res.transporters || res.data || (Array.isArray(res) ? res : []));
+    } catch (err) {
+        setShipError(err.message || 'Could not load transporters.');
+        setShipTransporters([]);
+    } finally {
+        setShipLoading(false);
+    }
+  };
+
+  const handleShipWithoutTransporter = async (orderId) => {
     if (!orderId) return;
 
     setProcessingOrders(prev => ({ ...prev, [orderId]: true }));
@@ -592,6 +630,52 @@ const FarmerDashboard = () => {
         alert("⚠️ " + err.message);
     } finally {
         setProcessingOrders(prev => ({ ...prev, [orderId]: false }));
+    }
+  };
+
+  const handleGetQuote = async () => {
+    if (!shipOrderId || !shipSelected) return;
+    setShipQuoteLoading(true);
+    setShipError('');
+    try {
+        const res = await quoteShipment({ order_id: shipOrderId, transporter_id: shipSelected });
+        setShipQuote(res);
+    } catch (err) {
+        setShipError(err.message || 'Could not get a quote.');
+        setShipQuote(null);
+    } finally {
+        setShipQuoteLoading(false);
+    }
+  };
+
+  const handleBookShipment = async () => {
+    if (!shipOrderId || !shipSelected || !shipQuote) return;
+    if (!shipWindowStart || !shipWindowEnd) {
+        setShipError('Enter a delivery window (start and end).');
+        return;
+    }
+    if (new Date(shipWindowEnd) < new Date(shipWindowStart)) {
+        setShipError('The delivery window end must be on or after the start.');
+        return;
+    }
+    setShipBooking(true);
+    setShipError('');
+    try {
+        const res = await createShipment({
+            order_id: shipOrderId,
+            transporter_id: shipSelected,
+            price_paise: shipQuote.price_paise,
+            delivery_window_start: new Date(shipWindowStart).toISOString(),
+            delivery_window_end: new Date(shipWindowEnd).toISOString(),
+        });
+        const shipment = res.shipment || res;
+        setShipBookedId(shipment?.id || null);
+        setOrders(prev => prev.map(o => o.id === shipOrderId ? { ...o, status: 'SHIPPED' } : o));
+        fetchMyOrders();
+    } catch (err) {
+        setShipError(err.message || 'Could not book the shipment.');
+    } finally {
+        setShipBooking(false);
     }
   };
 
@@ -1577,6 +1661,98 @@ const FarmerDashboard = () => {
               <div className="absolute top-8 left-1/2 -translate-x-1/2 text-center pointer-events-none">
                   <h4 className="text-white font-black uppercase tracking-[0.4em] text-xs mb-1 opacity-50">Harvest Inspection</h4>
                   <p className="text-amber font-black text-2xl uppercase tracking-tighter">{lightbox.productName}</p>
+              </div>
+          </div>
+      )}
+      {/* Ship with transporter (Stage 6) — pick a verified transporter,
+          get a quote, pick a delivery window, book. Self-delivery falls
+          back to the unchanged /ship-order call. */}
+      {shipOrderId && (
+          <div className="fixed inset-0 bg-green-deep/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-2xl rounded-[32px] overflow-hidden shadow-2xl flex flex-col">
+                  <div className="bg-green-deep p-6 text-white flex justify-between items-center">
+                      <h2 className="text-2xl font-playfair font-black">Book Delivery</h2>
+                      <button onClick={() => setShipOrderId(null)} className="text-white/40 hover:text-white text-2xl">×</button>
+                  </div>
+                  <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+                      {shipBookedId ? (
+                          <div>
+                              <p className="text-green-fresh font-black mb-4">Shipment booked — the order is marked shipped.</p>
+                              <Link to={`/shipments/${shipBookedId}/track`} className="font-bold text-green-mid hover:text-green-deep">Track shipment →</Link>
+                          </div>
+                      ) : (
+                          <>
+                              {shipLoading ? (
+                                  <p className="text-center py-10 text-gray-400 italic">Loading transporters...</p>
+                              ) : shipTransporters.length === 0 ? (
+                                  <p className="text-gray-500 font-medium py-10 text-center">No verified transporters available. Ship it yourself below.</p>
+                              ) : (
+                                  <div className="space-y-3">
+                                      <p className="text-xs font-bold uppercase text-gray-400">Pick a transporter</p>
+                                      {shipTransporters.map((t) => (
+                                          <label key={t.id} className="flex items-center gap-3 bg-cream rounded-xl p-4 cursor-pointer">
+                                              <input
+                                                  type="radio"
+                                                  name="ship-transporter"
+                                                  checked={shipSelected === t.id}
+                                                  onChange={() => { setShipSelected(t.id); setShipQuote(null); }}
+                                              />
+                                              <span className="font-bold text-green-deep">{t.vehicle_type} · {t.vehicle_number}</span>
+                                              <span className="text-sm text-gray-500">
+                                                  {(t.service_areas || []).join(', ')}
+                                                  {t.rate_paise_per_km != null ? ` · ₹${(t.rate_paise_per_km / 100).toFixed(2)}/km` : ''}
+                                                  {t.flat_rate_paise != null ? ` · ₹${(t.flat_rate_paise / 100).toFixed(2)} flat` : ''}
+                                              </span>
+                                          </label>
+                                      ))}
+                                      <button
+                                          onClick={() => void handleGetQuote()}
+                                          disabled={!shipSelected || shipQuoteLoading}
+                                          className="bg-green-deep text-white font-bold px-6 py-3 rounded-xl disabled:opacity-50"
+                                      >
+                                          {shipQuoteLoading ? 'Getting quote...' : 'Get Quote'}
+                                      </button>
+                                  </div>
+                              )}
+                              {shipQuote && (
+                                  <div className="bg-cream rounded-xl p-4">
+                                      <p className="font-black text-green-deep text-lg">₹{(Number(shipQuote.price_paise || 0) / 100).toFixed(2)} {shipQuote.currency || 'INR'}</p>
+                                      <p className="text-sm text-gray-500">
+                                          {shipQuote.distance_km != null ? `Distance: ${shipQuote.distance_km} km` : 'Flat rate — no distance quoted'}
+                                      </p>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                                          <div>
+                                              <label className="text-xs font-bold uppercase text-gray-400">Delivery window start</label>
+                                              <input type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowStart} onChange={(e) => setShipWindowStart(e.target.value)} />
+                                          </div>
+                                          <div>
+                                              <label className="text-xs font-bold uppercase text-gray-400">Delivery window end</label>
+                                              <input type="datetime-local" className="w-full bg-white rounded-xl p-4 mt-1" value={shipWindowEnd} onChange={(e) => setShipWindowEnd(e.target.value)} />
+                                          </div>
+                                      </div>
+                                      <button
+                                          onClick={() => void handleBookShipment()}
+                                          disabled={shipBooking}
+                                          className="mt-4 bg-green-fresh text-white font-black py-4 px-8 rounded-xl disabled:opacity-50"
+                                      >
+                                          {shipBooking ? 'Booking...' : 'Book Shipment'}
+                                      </button>
+                                  </div>
+                              )}
+                              {shipError && <p className="text-sm text-red-600">{shipError}</p>}
+                              <div className="border-t border-cream-dark pt-4">
+                                  <p className="text-sm text-gray-500 mb-3">Delivering it yourself instead?</p>
+                                  <button
+                                      onClick={() => { void handleShipWithoutTransporter(shipOrderId); setShipOrderId(null); }}
+                                      disabled={processingOrders[shipOrderId]}
+                                      className="bg-white border-2 border-green-deep/10 text-green-deep font-bold px-6 py-3 rounded-xl disabled:opacity-50"
+                                  >
+                                      {processingOrders[shipOrderId] ? 'Shipping...' : 'Ship Without Transporter'}
+                                  </button>
+                              </div>
+                          </>
+                      )}
+                  </div>
               </div>
           </div>
       )}
