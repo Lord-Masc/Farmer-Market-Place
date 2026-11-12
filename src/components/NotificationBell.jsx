@@ -24,7 +24,7 @@ const NotificationBell = () => {
     <Link
       to="/notifications"
       aria-label={unreadCount ? `${unreadCount} unread notifications` : 'Notifications'}
-      className="relative flex items-center justify-center w-10 h-10 bg-white border-2 border-green-fresh/30 rounded-full hover:border-green-fresh transition-all duration-200 shadow-sm"
+      className="wayfind relative flex items-center justify-center w-10 h-10 bg-white border-2 border-green-fresh/30 rounded-full hover:border-green-fresh transition-all duration-200 shadow-sm"
     >
       <span className="text-lg">🔔</span>
       {unreadCount > 0 && (
